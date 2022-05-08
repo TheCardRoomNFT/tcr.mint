@@ -139,7 +139,7 @@ def main():
                                            action='store',
                                            metavar='NAME',
                                            default=None,
-                                           help='Create a new policy on <network> for <wallet>.  Requires --wallet')
+                                           help='Create a new policy on <network> for <wallet>, expires in <months>.  Requires --wallet')
     parser.add_argument('--create-drop',   required=False,
                                            action='store',
                                            metavar='NAME',
@@ -150,6 +150,12 @@ def main():
                                                   metavar='NAME',
                                                   default=None,
                                                   help='')
+    parser.add_argument('--set-royalty', required=False,
+                                         action='store',
+                                         metavar='percent',
+                                         type=float,
+                                         default=0.0,
+                                         help='percent royalty')
     parser.add_argument('--mint',   required=False,
                                     action='store_true',
                                     default=False,
@@ -177,6 +183,11 @@ def main():
                                     metavar='NAME',
                                     default=None,
                                     help='The name of the wallet for accepting payment and minting.')
+    parser.add_argument('--royalty-address', required=False,
+                                             action='store',
+                                             metavar='ADDRESS',
+                                             default=None,
+                                             help='Address for receiving royalty payments.')
     parser.add_argument('--drop',   required=False,
                                     action='store',
                                     metavar='NAME',
@@ -188,6 +199,12 @@ def main():
                                     type=int,
                                     default=0,
                                     help='Seed for RNG')
+    parser.add_argument('--months', required=False,
+                                    action='store',
+                                    metavar='VALUE',
+                                    type=int,
+                                    default=12,
+                                    help='How long the new policy is unlocked')
     parser.add_argument('--test-combos', required=False,
                                          action='store_true',
                                          default=False,
@@ -214,6 +231,9 @@ def main():
     confirm = args.confirm
     test_combos = args.test_combos
     whitelist = args.whitelist
+    months = args.months
+    set_royalty = args.set_royalty
+    royalty_address = args.royalty_address
 
     setup_logging(network, 'nftmint')
     logger = logging.getLogger(network)
@@ -230,7 +250,7 @@ def main():
     logger.info('Copyright 2021-2022 The Card Room')
     logger.info('Network: {}'.format(network))
 
-    if create_wallet != None or create_policy != None or mint or burn:
+    if create_wallet != None or create_policy != None or mint or burn or set_royalty:
         tip = cardano.query_tip()
         cardano.query_protocol_parameters()
         database.open()
@@ -288,7 +308,7 @@ def main():
             logger.error('Wallet: <{}> does not exist'.format(wallet_name))
             raise Exception('Wallet: <{}> does not exist'.format(wallet_name))
 
-        cardano.create_new_policy_id(tip_slot+tcr.tcr.SECONDS_PER_MONTH * 6,
+        cardano.create_new_policy_id(tip_slot+tcr.tcr.SECONDS_PER_MONTH * months,
                                      policy_wallet,
                                      create_policy)
 
@@ -297,7 +317,8 @@ def main():
             raise Exception('Failed to create policy: <{}>'.format(create_policy))
 
         logger.info('Successfully created new policy: {} / {}'.format(create_policy, cardano.get_policy_id(create_policy)))
-        logger.info('Expires at slot: {}'.format(tip_slot+(tcr.tcr.SECONDS_PER_MONTH * 6)))
+        logger.info('Expires at slot: {}'.format(tip_slot+(tcr.tcr.SECONDS_PER_MONTH * months)))
+        logger.info('Expires in: {} months'.format(months))
     elif create_drop != None:
         #
         # Create a new drop, metadata and nft images
@@ -427,6 +448,42 @@ def main():
                                               max_per_tx)
         except Exception as e:
             logger.exception("Caught Exception")
+    elif set_royalty != 0.0:
+        # https://cips.cardano.org/cips/cip27/
+        if set_royalty < 0.0:
+            logger.error('Royalty must be > 0: {}'.format(set_royalty))
+            raise Exception('Royalty must be > 0: {}'.format(set_royalty))
+
+        if (policy_name == None):
+            logger.error('--set-royalty, Requires --policy')
+            raise Exception('--set-royalty, Requires --policy')
+
+        if (royalty_address == None):
+            logger.error('--set-royalty, Requires --royalty-address')
+            raise Exception('--set-royalty, Requires --royalty-address')
+
+        # Set the policy name
+        policy_id = cardano.get_policy_id(policy_name)
+        logger.info('Policy: {} / {}'.format(policy_name, policy_id))
+        if cardano.get_policy_id(policy_name) == None:
+            logger.error('Policy: {}, does not exist'.format(policy_name))
+            raise Exception('Policy: {}, does not exist'.format(policy_name))
+
+        logger.info('Writing Royalty Metadata File')
+        royalty_metadata_file = 'policy/{}/{}.royalty'.format(cardano.get_network(), policy_name)
+        with open(royalty_metadata_file, 'w') as file:
+            file.write('{\r\n')
+            file.write('    \"777\":\r\n')
+            file.write('    {\r\n')
+            file.write('        \"rate\": \"{}\",\r\n'.format(set_royalty/100.0))
+            file.write('        \"addr\": [\"{}\",\r\n'.format(royalty_address[0:64]))
+            file.write('                   \"{}\"]\r\n'.format(royalty_address[64:]))
+            file.write('    }\r\n')
+            file.write('}\r\n')
+
+        txid = tcr.tcr.mint_royalty_token(cardano, database, policy_name, royalty_metadata_file)
+        logger.info('tx id = {}'.format(txid))
+
     elif burn == True:
         #
         # Burn the tokens
@@ -465,7 +522,14 @@ def main():
                 input_utxos = []
                 for utxo in utxos:
                     for a in utxo['assets']:
-                        if a.startswith('{}.'.format(policy_id)):
+                        if a == policy_id:
+                            # special case for royalty tokens
+                            if len(token_names) < 200:
+                                utxo_in = utxo
+                                token_names.append('')
+                                if not utxo in input_utxos:
+                                    input_utxos.append(utxo)
+                        elif a.startswith('{}.'.format(policy_id)):
                             if len(token_names) < 200:
                                 utxo_in = utxo
                                 token_name = a.split('.')[1]
@@ -482,6 +546,7 @@ def main():
                     has_tokens = False
                     logger.error('No tokens found for policy')
         elif token_name != None:
+            logger.info('token name = {}'.format(token_name))
             # burn just the specified token in the specified policy
             token_names = []
             (utxos, lovelace) = cardano.query_utxos(burn_wallet)
@@ -492,7 +557,14 @@ def main():
             input_utxos = []
             for utxo in utxos:
                 for a in utxo['assets']:
-                    if a == '{}.{}'.format(policy_id, token_name):
+                    if a == policy_id:
+                        # special case for royalty tokens
+                        if len(token_names) < 200:
+                            utxo_in = utxo
+                            token_names.append('')
+                            if not utxo in input_utxos:
+                                input_utxos.append(utxo)
+                    elif a == '{}.{}'.format(policy_id, token_name):
                         token_names.append(token_name)
                         if not utxo in input_utxos:
                             input_utxos.append(utxo)

@@ -89,7 +89,9 @@ class Cardano:
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_MINT, delegated=False),
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_MINT, delegated=True),
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_PRESALE, delegated=False),
-                                 wallet.get_payment_address(Wallet.ADDRESS_INDEX_PRESALE, delegated=True)])
+                                 wallet.get_payment_address(Wallet.ADDRESS_INDEX_PRESALE, delegated=True),
+                                 wallet.get_payment_address(Wallet.ADDRESS_INDEX_MUTATE_REQUEST, delegated=False),
+                                 wallet.get_payment_address(Wallet.ADDRESS_INDEX_MUTATE_REQUEST, delegated=True)])
 
             addresses = list(addresses_set)
         total_lovelace = 0
@@ -348,13 +350,58 @@ class Cardano:
                 command.append('{}+{}{}'.format(address['address'], address['amount'], assets_string))
 
         command.extend(['--mint={}'.format(mint),
-                        '--minting-script-file', 'policy/{}/{}.script'.format(self.network, policy_name),
+                        '--mint-script-file', 'policy/{}/{}.script'.format(self.network, policy_name),
                         '--metadata-json-file', nft_metadata_file,
                         '--invalid-hereafter', '{}'.format(invalid_hereafter),
                         '--out-file', transaction_file])
 
         output = Command.run(command, None)
         return (output, mint_map)
+
+    def create_mint_royalty_token_transaction_file(self,
+                                                   input_utxo,
+                                                   output_address,
+                                                   fee_amount,
+                                                   policy_name,
+                                                   nft_metadata_file,
+                                                   transaction_file):
+        nft_metadata = Nft.parse_metadata_file(nft_metadata_file)
+        if nft_metadata['policy-id'] != '777':
+            logger.error('Unexpected policy-id: {}'.format(nft_metadata['policy-id']))
+            raise Exception('Unexpected policy-id: {}'.format(nft_metadata['policy-id']))
+
+        if len(nft_metadata['token-names']) > 1:
+            logger.error('too many tokens for royalty token: {}'.format(len(nft_metadata['token-names'])))
+            raise Exception('too many tokens for royalty token: {}'.format(len(nft_metadata['token-names'])))
+
+        policy_id = self.get_policy_id(policy_name)
+        token_names = nft_metadata['token-names']
+
+        mint = '1 {}'.format(policy_id)
+
+        invalid_hereafter = 0
+        with open('policy/{}/{}.script'.format(self.network, policy_name), "r") as file:
+            script = json.loads(file.read())
+            for s in script['scripts']:
+                if s['type'] == 'before':
+                    invalid_hereafter = s['slot']
+
+        command = ['cardano-cli', 'transaction', 'build-raw', '--fee', '{}'.format(fee_amount)]
+
+        command.append('--tx-in')
+        command.append('{}#{}'.format(input_utxo['tx-hash'], input_utxo['tx-ix']))
+
+        command.append('--tx-out')
+        command.append('{}+{}+{}'.format(output_address, input_utxo['amount'] - fee_amount, mint))
+
+        command.extend(['--mint={}'.format(mint),
+                        '--mint-script-file', 'policy/{}/{}.script'.format(self.network, policy_name),
+                        '--metadata-json-file', nft_metadata_file,
+                        '--invalid-hereafter', '{}'.format(invalid_hereafter),
+                        '--out-file', transaction_file])
+
+        output = Command.run(command, None)
+        return output
 
     def calculate_min_required_utxo_mint(self,
                                          input_utxos: List,
@@ -420,8 +467,13 @@ class Cardano:
             else:
                 burn += '+{} {}.{}'.format(-1*nft_token_amount, policy_id, token_name)
             # remove the nft being burned from the output
-            full_name = '{}.{}'.format(policy_id, token_name)
-            address_outputs_cp[len(address_outputs_cp)-1]['assets'][full_name] -= nft_token_amount
+            if token_name == '':
+                # special case for royalty tokens
+                full_name = policy_id
+            else:
+                full_name = '{}.{}'.format(policy_id, token_name)
+            index = len(address_outputs_cp)-1
+            address_outputs_cp[index]['assets'][full_name] -= nft_token_amount
 
         invalid_hereafter = 0
         with open('policy/{}/{}.script'.format(self.network, policy_name), "r") as file:
@@ -450,7 +502,7 @@ class Cardano:
                 command.append('{}+{}{}'.format(address['address'], address['amount'], assets_string))
 
         command.extend(['--mint={}'.format(burn),
-                        '--minting-script-file', 'policy/{}/{}.script'.format(self.network, policy_name),
+                        '--mint-script-file', 'policy/{}/{}.script'.format(self.network, policy_name),
                         '--invalid-hereafter', '{}'.format(invalid_hereafter),
                         '--out-file', transaction_file])
 
@@ -500,19 +552,21 @@ class Cardano:
                              before_slot: int,
                              policy_wallet: Wallet,
                              policy_name: str) -> str:
+
+        policy_verification_key_file = self.get_policy_verification_key_file(policy_name)
+        policy_signing_key_file = self.get_policy_signing_key_file(policy_name)
+
         # create new keys for the policy
         command = ['cardano-cli', 'address', 'key-gen',
-                   '--verification-key-file', 'policy/{}/{}.vkey'.format(self.network, policy_name),
-                   '--signing-key-file', 'policy/{}/{}.skey'.format(self.network, policy_name)]
+                   '--verification-key-file', policy_verification_key_file,
+                   '--signing-key-file', policy_signing_key_file]
         Command.run(command, None)
 
-        # TODO: Should use the policy vkey instead of wallet vkey
         # TODO: Then sign transaction with policy skey instead of wallet root skey
 
         # create signature hash from keys
         command = ['cardano-cli', 'address', 'key-hash',
-                   '--payment-verification-key-file',
-                   policy_wallet.get_verification_key_file(Wallet.ADDRESS_INDEX_ROOT)]
+                   '--payment-verification-key-file', policy_verification_key_file]
         sig_key_hash = Command.run(command, None)
 
         # create script file requires sign by policy keys and only valid until specified slot
@@ -539,7 +593,18 @@ class Cardano:
         with open('policy/{}/{}.id'.format(self.network, policy_name), 'w') as file:
             file.write(output)
 
+        with open('policy/{}/{}.owner'.format(self.network, policy_name), 'w') as file:
+            file.write(policy_wallet.get_name())
+
         return output
+
+    def get_policy_verification_key_file(self, policy_name) -> str:
+        file_name = 'policy/{}/{}.vkey'.format(self.network, policy_name)
+        return file_name
+
+    def get_policy_signing_key_file(self, policy_name: str) -> str:
+        file_name = 'policy/{}/{}.skey'.format(self.network, policy_name)
+        return file_name
 
     def get_policy_id(self,
                       policy_name: str) -> str:

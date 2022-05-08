@@ -362,7 +362,7 @@ def burn_nft_internal(cardano: Cardano,
     #sign
     cardano.sign_transaction('transaction/burn_nft_internal_unsigned_tx_{}'.format(os.getpid()),
                              [burning_wallet.get_signing_key_file(0),
-                              burning_wallet.get_signing_key_file(1)],
+                              cardano.get_policy_signing_key_file(policy_name)],
                              'transaction/burn_nft_internal_signed_tx_{}'.format(os.getpid()))
     #submit
     tx_id = cardano.submit_transaction('transaction/burn_nft_internal_signed_tx_{}'.format(os.getpid()))
@@ -376,7 +376,10 @@ def verify_unique_nfts(cardano: Cardano,
     # Make sure we're not about to mint multiple of the same token
     # Make sure the token we're about to mint hasn't already been minted
     nft_metadata = Nft.parse_metadata_file(nft_metadata_file)
+
     policy_id = nft_metadata['policy-id']
+    if policy_id == '777':
+        policy_id = cardano.get_policy_id(policy_name)
 
     if policy_id != cardano.get_policy_id(policy_name):
         logger.error("Policy ID mismatch")
@@ -384,6 +387,7 @@ def verify_unique_nfts(cardano: Cardano,
 
     token_names = nft_metadata['token-names']
     minted_nfts = database.query_mint_transactions(policy_id)
+    print(minted_nfts)
 
     for name in token_names:
         if token_names.count(name) > 1:
@@ -395,6 +399,78 @@ def verify_unique_nfts(cardano: Cardano,
             return False
 
     return True
+
+def mint_royalty_token(cardano: Cardano,
+                       database: Database,
+                       policy_name: str,
+                       nft_metadata_file: str) -> str:
+    """
+    Mint a royalty token.
+
+    """
+
+    # Initialize the wallet
+    wallet_name = cardano.get_policy_owner(policy_name)
+    mint_wallet = Wallet(wallet_name, cardano.get_network())
+    logger.info('Mint Wallet: {}'.format(wallet_name))
+    if not mint_wallet.exists():
+        logger.error('Wallet: {}, does not exist'.format(wallet_name))
+        raise Exception('Wallet: {}, does not exist'.format(wallet_name))
+
+    if not verify_unique_nfts(cardano, database, policy_name, nft_metadata_file):
+        logger.error("NFT Uniqueness Violation found.")
+        raise Exception('NFT Uniqueness Violation')
+
+    (utxos, total_lovelace) = cardano.query_utxos(mint_wallet, [mint_wallet.get_delegated_payment_address(Wallet.ADDRESS_INDEX_ROOT)])
+    input_utxo = None
+    for utxo in utxos:
+        if utxo['amount'] >= 3000000 and len(utxo['assets']) == 0:
+            input_utxo = utxo
+            break
+
+    if input_utxo == None:
+        logger.error('Could not find suitable input utxo')
+        return None
+
+    print('input utxo: {}'.format(input_utxo))
+
+    # draft
+    fee = 0
+    cardano.create_mint_royalty_token_transaction_file(input_utxo,
+                                                       mint_wallet.get_payment_address(Wallet.ADDRESS_INDEX_ROOT),
+                                                       fee,
+                                                       policy_name,
+                                                       nft_metadata_file,
+                                                       'transaction/mint_royalty_token_draft_tx_{}'.format(os.getpid()))
+
+    total_input_lovelace = input_utxo['amount']
+
+    logger.debug("Mint Royalty Token, total payment received: {} ADA".format(total_input_lovelace / 1000000))
+
+    #fee
+    fee = cardano.calculate_min_fee('transaction/mint_royalty_token_draft_tx_{}'.format(os.getpid()),
+                                    1, 1, 2)
+
+    logger.debug('Mint Royalty Token, Fee = {} lovelace'.format(fee))
+
+    #final
+    output = cardano.create_mint_royalty_token_transaction_file(input_utxo,
+                                                                mint_wallet.get_payment_address(Wallet.ADDRESS_INDEX_ROOT),
+                                                                fee,
+                                                                policy_name,
+                                                                nft_metadata_file,
+                                                                'transaction/mint_royalty_token_unsigned_tx_{}'.format(os.getpid()))
+    #sign
+    cardano.sign_transaction('transaction/mint_royalty_token_unsigned_tx_{}'.format(os.getpid()),
+                             [mint_wallet.get_signing_key_file(Wallet.ADDRESS_INDEX_ROOT),
+                              cardano.get_policy_signing_key_file(policy_name)],
+                             'transaction/mint_royalty_token_signed_tx_{}'.format(os.getpid()))
+    #submit
+    tx_id = cardano.submit_transaction('transaction/mint_royalty_token_signed_tx_{}'.format(os.getpid()))
+
+    logger.debug('Submit Mint Royalty Token, TXID: {}'.format(tx_id))
+
+    return tx_id
 
 def mint_nft_external(cardano: Cardano,
                       database: Database,
@@ -517,11 +593,9 @@ def mint_nft_external(cardano: Cardano,
         ix = int(item.split('#')[1])
         sales.set_tokens_minted(hash, ix, mint_map[item]['tokens'])
 
-    # TODO wallet root should be replaced with policy key after creating policy
-    # key is updated
     #sign
     cardano.sign_transaction('transaction/mint_nft_external_unsigned_tx_{}'.format(os.getpid()),
-                             [minting_wallet.get_signing_key_file(Wallet.ADDRESS_INDEX_ROOT),
+                             [cardano.get_policy_signing_key_file(policy_name),
                               minting_wallet.get_signing_key_file(Wallet.ADDRESS_INDEX_MINT),
                               minting_wallet.get_signing_key_file(Wallet.ADDRESS_INDEX_PRESALE)],
                              'transaction/mint_nft_external_signed_tx_{}'.format(os.getpid()))
