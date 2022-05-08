@@ -33,6 +33,7 @@ import binascii
 
 logger = logging.getLogger('database')
 
+# https://github.com/input-output-hk/cardano-db-sync/blob/master/doc/schema.md
 # https://github.com/input-output-hk/cardano-db-sync/blob/master/doc/interesting-queries.md
 class Database:
     def __init__(self, config_file: str):
@@ -177,6 +178,10 @@ class Database:
         row = cursor.fetchone()
         logger.debug('query_stake_address(), response:\r\n{}'.format(row))
         cursor.close()
+
+        if row == None:
+            return None
+
         return row[2]
 
     def query_utxo_outputs(self, txid: str):
@@ -214,7 +219,10 @@ class Database:
         logger.debug('query_utxo_inputs(), response:\r\n{}'.format(rows))
         inputs = []
         for row in rows:
-            inputs.append({'address': row[3], 'value': int(row[7])})
+            value = 0
+            if row[7] != None:
+                value = int(row[7])
+            inputs.append({'address': row[3], 'value': value})
         cursor.close()
         return inputs
 
@@ -258,7 +266,7 @@ class Database:
         if self.connection == None:
             raise Exception("Database Not Connected")
 
-        sql = ('select tx_metadata.tx_id, tx_metadata.json, multi_asset.name, multi_asset.policy from tx_metadata '
+        sql = ('select tx_metadata.tx_id, tx_metadata.json, multi_asset.name, multi_asset.policy, tx_metadata.key from tx_metadata '
                'inner join ma_tx_mint on tx_metadata.tx_id = ma_tx_mint.tx_id '
                'inner join multi_asset on ma_tx_mint.ident = multi_asset.id '
                'where multi_asset.fingerprint = \'{}\''.format(fingerprint))
@@ -268,16 +276,26 @@ class Database:
         cursor.execute(sql)
         rows = cursor.fetchall()
 
+        if len(rows) == 0:
+            return (None, None, None)
+
         index = len(rows) - 1
         token_name = bytes(rows[index][2]).decode("utf-8")
         token_policy = bytes(rows[index][3]).hex()
-        return (token_policy, rows[index][1][token_policy][token_name])
+        key = int(rows[index][4])
+        metadata = rows[index][1]
+
+        return (token_policy, token_name, {key: metadata})
 
     def query_mint_transactions(self, policy_id: str) -> Dict:
         if self.connection == None:
             raise Exception("Database Not Connected")
 
-        sql = 'select * from ma_tx_mint where ma_tx_mint.policy=\'\\x{}\' order by tx_id;'.format(policy_id)
+        sql = ('select multi_asset.name, multi_asset.fingerprint, ma_tx_mint.quantity, tx.hash from ma_tx_mint '
+               'inner join multi_asset on ma_tx_mint.ident = multi_asset.id '
+               'inner join tx on ma_tx_mint.tx_id = tx.id '
+               'where multi_asset.policy=\'\\x{}\';'.format(policy_id))
+
         logger.debug('query_mint_transactions(), sql = {}'.format(sql))
 
         cursor = self.connection.cursor()
@@ -285,23 +303,21 @@ class Database:
         rows = cursor.fetchall()
         tokens = {}
         for row in rows:
-            name = binascii.unhexlify(bytes(row[2]).hex()).decode("utf-8")
-            quantity = row[3]
+            name = binascii.unhexlify(bytes(row[0]).hex()).decode("utf-8")
+            hash = bytes(row[3]).hex()
+            quantity = int(row[2])
             if not name in tokens:
-                tokens[name] = quantity
+                tokens[name] = {'quantity': quantity, 'fingerprint': row[1], 'txid': [hash]}
             else:
-                tokens[name] += quantity
+                tokens[name]['quantity'] += quantity
+                tokens[name]['txid'].append(hash)
 
-            if tokens[name] < 0:
+            if tokens[name]['quantity'] < 0:
                 logger.error('that was unexpected.  need to sort by date???')
                 raise Exception('that was unexpected.  need to sort by date???')
 
-            if tokens[name] == 0:
-                tokens.pop(name)
-
         return tokens
 
-    # https://github.com/input-output-hk/cardano-db-sync/blob/master/doc/schema.md
     def query_current_owner(self, policy_id: str):
         if self.connection == None:
             raise Exception("Database Not Connected")

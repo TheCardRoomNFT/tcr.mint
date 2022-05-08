@@ -60,16 +60,20 @@ class Nft:
 
         """
         metadata = {}
-
         with open(metadata_file, 'r') as file:
             raw_md = json.load(file)
-            policy_id = list(raw_md['721'].keys())[0]
-            token_names = list(raw_md['721'][policy_id].keys())
-            metadata['policy-id'] = policy_id
-            metadata['token-names'] = token_names
-            metadata['properties'] = {}
-            for token_name in token_names:
-                metadata['properties'][token_name] = raw_md['721'][policy_id][token_name]
+            if '721' in raw_md:
+                policy_id = list(raw_md['721'].keys())[0]
+                token_names = list(raw_md['721'][policy_id].keys())
+                metadata['policy-id'] = policy_id
+                metadata['token-names'] = token_names
+                metadata['properties'] = {}
+                for token_name in token_names:
+                    metadata['properties'][token_name] = raw_md['721'][policy_id][token_name]
+            elif '777' in raw_md:
+                metadata['policy-id'] = '777'
+                metadata['token-names'] = ['']
+                metadata['properties'] = {'': {}}
 
         return metadata
 
