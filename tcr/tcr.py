@@ -106,7 +106,10 @@ def transfer_all_assets(cardano: Cardano,
 
     # Sign the transaction
     cardano.sign_transaction('transaction/transfer_all_assets_unsigned_tx_{}'.format(os.getpid()),
-                             [from_wallet.get_signing_key_file(0), from_wallet.get_signing_key_file(1)],
+                             [from_wallet.get_signing_key_file(0),
+                              from_wallet.get_signing_key_file(1),
+                              from_wallet.get_signing_key_file(2),
+                              from_wallet.get_signing_key_file(3)],
                              'transaction/transfer_all_assets_signed_tx_{}'.format(os.getpid()))
 
     #submit
@@ -387,7 +390,6 @@ def verify_unique_nfts(cardano: Cardano,
 
     token_names = nft_metadata['token-names']
     minted_nfts = database.query_mint_transactions(policy_id)
-    print(minted_nfts)
 
     for name in token_names:
         if token_names.count(name) > 1:
@@ -395,8 +397,10 @@ def verify_unique_nfts(cardano: Cardano,
             return False
 
         if name in minted_nfts:
-            logger.error('Token already minted!')
-            return False
+            logger.warning('Found {} in minted NFTs, quantity: {}'.format(name, minted_nfts[name]['quantity']))
+            if minted_nfts[name]['quantity'] > 0:
+                logger.error('Token already minted!')
+                return False
 
     return True
 
@@ -431,8 +435,6 @@ def mint_royalty_token(cardano: Cardano,
     if input_utxo == None:
         logger.error('Could not find suitable input utxo')
         return None
-
-    print('input utxo: {}'.format(input_utxo))
 
     # draft
     fee = 0
@@ -475,6 +477,7 @@ def mint_royalty_token(cardano: Cardano,
 def mint_nft_external(cardano: Cardano,
                       database: Database,
                       minting_wallet: Wallet,
+                      signing_index: int,
                       policy_name: str,
                       input_utxos: List,
                       nft_metadata_file: str,
@@ -547,7 +550,7 @@ def mint_nft_external(cardano: Cardano,
     fee = cardano.calculate_min_fee('transaction/mint_nft_external_draft_tx_{}'.format(os.getpid()),
                                     len(input_utxos),
                                     len(address_outputs),
-                                    3)
+                                    2)
 
     # update output amounts
     address_outputs[0]['amount'] = total_input_lovelace - fee # the project keeps
@@ -596,12 +599,10 @@ def mint_nft_external(cardano: Cardano,
     #sign
     cardano.sign_transaction('transaction/mint_nft_external_unsigned_tx_{}'.format(os.getpid()),
                              [cardano.get_policy_signing_key_file(policy_name),
-                              minting_wallet.get_signing_key_file(Wallet.ADDRESS_INDEX_MINT),
-                              minting_wallet.get_signing_key_file(Wallet.ADDRESS_INDEX_PRESALE)],
+                              minting_wallet.get_signing_key_file(signing_index)],
                              'transaction/mint_nft_external_signed_tx_{}'.format(os.getpid()))
     #submit
     tx_id = cardano.submit_transaction('transaction/mint_nft_external_signed_tx_{}'.format(os.getpid()))
-
     return tx_id
 
 def batch_mint_next_nft_in_series(cardano: Cardano,
@@ -628,6 +629,7 @@ def batch_mint_next_nft_in_series(cardano: Cardano,
     tx_id = mint_nft_external(cardano,
                               database,
                               minting_wallet,
+                              Wallet.ADDRESS_INDEX_MINT,
                               policy_name,
                               input_utxos,
                               nft_metadata_file,

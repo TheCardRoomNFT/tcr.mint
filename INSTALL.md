@@ -30,12 +30,12 @@ Windows 10 WSL2
   - cd ~
   - mkdir cardano-bin
   - cd cardano-bin
-  - curl https://hydra.iohk.io/build/7872177/download/1/cardano-node-1.30.0-linux.tar.gz --output cardano-node-1.30.0-linux.tar.gz
-  - curl https://hydra.iohk.io/build/7857352/download/1/cardano-db-sync-11.0.4-linux.tar.gz --output cardano-db-sync-11.0.4-linux.tar.gz
-  - curl https://github.com/input-output-hk/cardano-addresses/releases/download/3.6.0/cardano-addresses-3.6.0-linux64.tar.gz --output cardano-addresses-3.6.0-linux64.tar.gz
-  - tar --ungzip -xvf cardano-node-1.30.0-linux.tar.gz
-  - tar --ungzip -xvf cardano-db-sync-11.0.0-linux.tar.gz
-  - tar --ungzip -xvf cardano-addresses-3.6.0-linux64.tar.gz
+  - curl https://hydra.iohk.io/build/12975675/download/1/cardano-node-1.33.0-linux.tar.gz --output cardano-node-1.33.0-linux.tar.gz
+  - curl https://hydra.iohk.io/build/14497396/download/1/cardano-db-sync-12.0.1-linux.tar.gz --output cardano-db-sync-12.0.1-linux.tar.gz
+  - curl https://github.com/input-output-hk/cardano-addresses/releases/download/3.9.0/cardano-addresses-3.9.0-linux64.tar.gz --output cardano-addresses-3.9.0-linux64.tar.gz
+  - tar --ungzip -xvf cardano-node-1.33.0-linux.tar.gz
+  - tar --ungzip -xvf cardano-db-sync-12.0.1-linux.tar.gz
+  - tar --ungzip -xvf cardano-addresses-3.9.0-linux64.tar.gz
   - Edit ~/.profile and add:
     * PATH=$PATH:/home/ubuntu/cardano-bin
     * export TESTNET_CARDANO_NODE_SOCKET_PATH="/home/ubuntu/cardano/testnet/db/node.socket"
@@ -65,7 +65,7 @@ Windows 10 WSL2
 ## 5.  Copy Configuration & Scripts
 
 Note that configuration files for mainnet and testnet are included in
-~/workspace/thecardroom/scripts/mainnet and ~/workspace/thecardroom/scripts/testnet
+~/workspace/tcr.mint/scripts/mainnet and ~/workspace/tcr.mint/scripts/testnet
 However, it's best to use the configuration files download with the binaries.
 
   - cp ~/cardano-bin/configuration/cardano/mainnet-alonzo-genesis.json ~/cardano/mainnet/
@@ -73,10 +73,10 @@ However, it's best to use the configuration files download with the binaries.
   - cp ~/cardano-bin/configuration/cardano/mainnet-config.json ~/cardano/mainnet/
   - cp ~/cardano-bin/configuration/cardano/mainnet-shelley-genesis.json ~/cardano/mainnet/
   - cp ~/cardano-bin/configuration/cardano/mainnet-topology.json ~/cardano/mainnet/
-  - cp ~/workspace/thecardroom/scripts/mainnet/network-magic.txt ~/cardano/mainnet
-  - cp ~/workspace/thecardroom/scripts/mainnet/run-node.sh ~/cardano/mainnet
-  - cp ~/workspace/thecardroom/scripts/mainnet/run-db-sync.sh ~/cardano/mainnet
-  - cp ~/workspace/thecardroom/scripts/mainnet/tail-logs.sh ~/cardano/mainnet
+  - cp ~/workspace/tcr.mint/scripts/mainnet/network-magic.txt ~/cardano/mainnet
+  - cp ~/workspace/tcr.mint/scripts/mainnet/run-node.sh ~/cardano/mainnet
+  - cp ~/workspace/tcr.mint/scripts/mainnet/run-db-sync.sh ~/cardano/mainnet
+  - cp ~/workspace/tcr.mint/scripts/mainnet/tail-logs.sh ~/cardano/mainnet
 
 Make sure the files are executable
 
@@ -87,16 +87,16 @@ Make sure the files are executable
 
 Optional, repeat for testnet:
 
-  - cp ~/workspace/thecardroom/scripts/testnet/testnet-alonzo-genesis.json ~/cardano/testnet/
-  - cp ~/workspace/thecardroom/scripts/testnet/testnet-byron-genesis.json ~/cardano/testnet/
-  - cp ~/workspace/thecardroom/scripts/testnet/testnet-config.json ~/cardano/testnet/
-  - cp ~/workspace/thecardroom/scripts/testnet/testnet-db-sync-config.json ~/cardano/testnet/
-  - cp ~/workspace/thecardroom/scripts/testnet/testnet-shelley-genesis.json ~/cardano/testnet/
-  - cp ~/workspace/thecardroom/scripts/testnet/testnet-topology.json ~/cardano/testnet/
-  - cp ~/workspace/thecardroom/scripts/testnet/network-magic.txt ~/cardano/testnet
-  - cp ~/workspace/thecardroom/scripts/testnet/run-node.sh ~/cardano/testnet
-  - cp ~/workspace/thecardroom/scripts/testnet/run-db-sync.sh ~/cardano/testnet
-  - cp ~/workspace/thecardroom/scripts/testnet/tail-logs.sh ~/cardano/testnet
+  - cp ~/workspace/tcr.mint/scripts/testnet/testnet-alonzo-genesis.json ~/cardano/testnet/
+  - cp ~/workspace/tcr.mint/scripts/testnet/testnet-byron-genesis.json ~/cardano/testnet/
+  - cp ~/workspace/tcr.mint/scripts/testnet/testnet-config.json ~/cardano/testnet/
+  - cp ~/workspace/tcr.mint/scripts/testnet/testnet-db-sync-config.json ~/cardano/testnet/
+  - cp ~/workspace/tcr.mint/scripts/testnet/testnet-shelley-genesis.json ~/cardano/testnet/
+  - cp ~/workspace/tcr.mint/scripts/testnet/testnet-topology.json ~/cardano/testnet/
+  - cp ~/workspace/tcr.mint/scripts/testnet/network-magic.txt ~/cardano/testnet
+  - cp ~/workspace/tcr.mint/scripts/testnet/run-node.sh ~/cardano/testnet
+  - cp ~/workspace/tcr.mint/scripts/testnet/run-db-sync.sh ~/cardano/testnet
+  - cp ~/workspace/tcr.mint/scripts/testnet/tail-logs.sh ~/cardano/testnet
 
 Make sure the files are executable
 
@@ -134,8 +134,8 @@ Run and Configure the database to run on startup
 
 
 ## 7.  Setup cardano node and dbsync to run on startup
-  - sudo cp ~/workspace/thecardroom/scripts/init.d/cardano-* /etc/init.d
-  - Review scripts in init.d and ~/workspace/thecardroom/scripts/mainnet to see
+  - sudo cp ~/workspace/tcr.mint/scripts/init.d/cardano-* /etc/init.d
+  - Review scripts in init.d and ~/workspace/tcr.mint/scripts/mainnet to see
     if any changes are needed for your environment.  Usernames, passwords, path,
     installation directory, etc.
   - sudo update-rc.d cardano-node-mainnet defaults
@@ -154,7 +154,7 @@ Optional, repeat for testnet
 
 ## 8.  Final Setup
 
-  - cd ~/workspace/thecardroom
+  - cd ~/workspace/tcr.mint
   - review testnet.ini
   - review mainnet.ini
   - mkdir log
