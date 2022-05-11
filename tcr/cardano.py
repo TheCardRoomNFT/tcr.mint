@@ -35,6 +35,7 @@ from tcr.wallet import Wallet
 import logging
 from tcr.database import Database
 import time
+import binascii
 
 logger = logging.getLogger('cardano')
 
@@ -296,8 +297,8 @@ class Cardano:
         for item in input_utxos:
             nfts_to_mint += item['count']
         if nfts_to_mint != len(token_names):
-            logger.error('Mint count mismatch {} != {}'.format(len(nfts_to_mint, len(token_names))))
-            raise Exception('Mint count mismatch {} != {}'.format(len(nfts_to_mint, len(token_names))))
+            logger.error('Mint count mismatch {} != {}'.format(nfts_to_mint, len(token_names)))
+            raise Exception('Mint count mismatch {} != {}'.format(nfts_to_mint, len(token_names)))
 
         mint = ''
         token_index = 0
@@ -311,7 +312,8 @@ class Cardano:
             for i in range(0, count):
                 if len(mint) > 0:
                     mint += '+'
-                full_name = '{}.{}'.format(policy_id, token_names[token_index])
+                token_hex_name = token_names[token_index].encode().hex()
+                full_name = '{}.{}'.format(policy_id, token_hex_name)
                 mint += '1 {}'.format(full_name)
                 # add the nft being minted to the output
                 address_outputs[address_index]['assets'][full_name] = 1
@@ -431,7 +433,8 @@ class Cardano:
         for item in input_utxos:
             count = item['count']
             for i in range(0, count):
-                full_name = '{}.{}'.format(policy_id, token_names[token_index])
+                token_hex_name = token_names[token_index].encode().hex()
+                full_name = '{}.{}'.format(policy_id, token_hex_name)
                 # add the nft being minted to the output
                 address_outputs[address_index]['assets'][full_name] = 1
                 token_index += 1

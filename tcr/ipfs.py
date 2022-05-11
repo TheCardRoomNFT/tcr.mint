@@ -28,6 +28,7 @@ Author: SuperKK
 Utility to upload files into IPFS and update a drop metametadata
 """
 
+from asyncio.log import logger
 from typing import Dict
 import argparse
 import json
@@ -38,8 +39,7 @@ import tcr.command
 import tcr.nftmint
 import traceback
 
-
-logger = None
+global logger
 
 def set_metametadata(network: str, drop_name: str, metametadata: Dict) -> None:
     metametadata_file = 'nft/{}/{}/{}_metametadata.json'.format(network, drop_name, drop_name)
@@ -66,6 +66,8 @@ def get_metadataset(network: str, drop_name: str) -> Dict:
     return metadataset
 
 def ipfs_upload(projectid: str, projectsecret: str, filename: str) -> str:
+    global logger
+
     files = {'file': (os.path.basename(filename), open(filename, 'rb'))}
 
     logger.info('Uploading: {}'.format(filename))
@@ -101,8 +103,6 @@ def ipfs_pin(projectid: str, projectsecret: str, ipfs_hash: str) -> str:
     return True
 
 def main():
-    global logger
-
     # Set parameters for the transactions
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--projectid', required=True,

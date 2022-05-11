@@ -557,6 +557,7 @@ def main():
             input_utxos = []
             for utxo in utxos:
                 for a in utxo['assets']:
+                    logger.info('Checking asset: {}'.format(a))
                     if a == policy_id:
                         # special case for royalty tokens
                         if len(token_names) < 200:
@@ -564,8 +565,8 @@ def main():
                             token_names.append('')
                             if not utxo in input_utxos:
                                 input_utxos.append(utxo)
-                    elif a == '{}.{}'.format(policy_id, token_name):
-                        token_names.append(token_name)
+                    elif a == '{}.{}'.format(policy_id, token_name.encode().hex()):
+                        token_names.append(token_name.encode().hex())
                         if not utxo in input_utxos:
                             input_utxos.append(utxo)
 
