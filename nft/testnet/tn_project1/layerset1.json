@@ -1,0 +1,11 @@
+{
+    "name": "layerset1",
+    "layers": [
+        "layerset1_layer1.json",
+        "layerset1_layer2.json",
+        "layerset1_layer3.json",
+        "layerset1_layer4.json",
+        "layerset1_layer5.json",
+        "layerset1_layer6.json"
+    ]
+}

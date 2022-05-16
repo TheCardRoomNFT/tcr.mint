@@ -228,8 +228,7 @@ class Cardano:
         minimum = 1000000
         count = assets.count('+')
         if count > 0:
-            minimum += 400000
-            minimum += (110000 * count)
+            minimum = 2000000 * count
 
         return minimum
 #        command = ['cardano-cli', 'transaction', 'calculate-min-required-utxo',

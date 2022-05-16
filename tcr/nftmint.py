@@ -38,7 +38,6 @@ from tcr.wallet import WalletExternal
 from tcr.metadata_list import MetadataList
 import tcr.command
 import tcr.tcr
-import tcr.words
 import numpy
 
 logger = None
@@ -99,8 +98,7 @@ def get_series_metadata_set_file(cardano: Cardano, policy_name: str, drop_name: 
 def create_series_metadata_set_file(cardano: Cardano,
                                     policy_name: str,
                                     drop_name: str,
-                                    rng: numpy.random.RandomState,
-                                    test_combos: bool) -> str:
+                                    rng: numpy.random.RandomState) -> str:
     metadata_set_file = 'nft/{}/{}/{}.json'.format(cardano.get_network(), drop_name, drop_name)
 
     if os.path.isfile(metadata_set_file):
@@ -109,14 +107,10 @@ def create_series_metadata_set_file(cardano: Cardano,
 
     series_metametadata = get_metametadata(cardano, drop_name)
     series_metametadata['policy'] = policy_name
-    #codewords = tcr.words.generate_word_list('words.txt', 500)
-    codewords = None
     files = Nft.create_series_metadata_set(cardano.get_network(),
                                            cardano.get_policy_id(policy_name),
                                            series_metametadata,
-                                           codewords,
-                                           rng,
-                                           test_combos)
+                                           rng)
     series_metametadata = set_metametadata(cardano, series_metametadata)
     metadata_set = {'files': files}
     with open(metadata_set_file, 'w') as file:
@@ -205,10 +199,6 @@ def main():
                                     type=int,
                                     default=12,
                                     help='How long the new policy is unlocked')
-    parser.add_argument('--test-combos', required=False,
-                                         action='store_true',
-                                         default=False,
-                                         help='Generate all combinations of two layers for --create-drop')
     parser.add_argument('--token',  required=False,
                                     action='store',
                                     metavar='NAME',
@@ -229,7 +219,6 @@ def main():
     token_name = args.token
     rng_seed = args.seed
     confirm = args.confirm
-    test_combos = args.test_combos
     whitelist = args.whitelist
     months = args.months
     set_royalty = args.set_royalty
@@ -291,7 +280,7 @@ def main():
         # Create a new policy
         #
         if (create_wallet != None or create_drop != None or create_drop_template != None or
-                mint == True or policy_name != None or drop_name != None):
+            mint == True or policy_name != None or drop_name != None):
             logger.error('--create-policy=<NAME>, Requires only --wallet')
             raise Exception('--create-policy=<NAME>, Requires only --wallet')
 
@@ -342,7 +331,7 @@ def main():
         logger.info('Create RNG with SEED: {}'.format(rng_seed))
 
         rng = numpy.random.default_rng(rng_seed)
-        metadata_set_file = create_series_metadata_set_file(cardano, policy_name, create_drop, rng, test_combos)
+        metadata_set_file = create_series_metadata_set_file(cardano, policy_name, create_drop, rng)
         logger.info('Successfully created new drop: {} '.format(metadata_set_file))
     elif create_drop_template != None:
         #
@@ -412,8 +401,6 @@ def main():
             prices[int(price)] = metametadata['prices'][price]
         logger.info('prices: {}'.format(prices))
 
-        max_per_tx = metametadata['max_per_tx']
-
         if whitelist != None:
             logger.info('Process Presale Whitelist Payments: {}'.format(whitelist))
             wl_payments = []
@@ -428,24 +415,20 @@ def main():
                                       policy_name,
                                       drop_name,
                                       metadata_set_file,
-                                      wl_payments,
-                                      max_per_tx)
+                                      wl_payments)
             logger.info('Process Whitelist Complete')
         else:
             logger.info('Whitelist Not Given')
 
         try:
             logger.info('Process General Sale Payments:')
-            # Listen for incoming payments and mint NFTs when a UTXO matching a payment
-            # value is found
             tcr.tcr.process_incoming_payments(cardano,
                                               database,
                                               mint_wallet,
                                               policy_name,
                                               drop_name,
                                               metadata_set_file,
-                                              prices,
-                                              max_per_tx)
+                                              prices)
         except Exception as e:
             logger.exception("Caught Exception")
     elif set_royalty != 0.0:

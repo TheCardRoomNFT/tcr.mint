@@ -486,7 +486,7 @@ def mint_nft_external(cardano: Cardano,
     Mint an NFT to a different wallet.
 
     input_utxos is a list of dictionaries.  Each object in the list looks like:
-    {"utxo": Dict, "count": N}
+    {"utxo": Dict, "count": N, "refund": lovelace}
     "utxo" is minting "N" NFTs.  The sum must add up to the number in nft_metadata_file
     Each utxo is assumed to contain 0 other assets.
     The destination address will be queried for each input utxo
@@ -683,8 +683,7 @@ def process_whitelist(cardano: Cardano,
                               policy_name: str,
                               drop_name: str,
                               metadata_set_file: str,
-                              whitelist_payments: List,
-                              max_per_tx: int) -> None:
+                              whitelist_payments: List) -> None:
     """
     Process payments in the given whitelist.  The number of NFTs to mint for each
     transaction is set in the whitelist payment.
@@ -729,7 +728,7 @@ def process_whitelist(cardano: Cardano,
             logger.error('Presale, NFTs Remaining: {}, Required: {}'.format(nft_metadata.get_remaining(), payment['nfts']))
             raise Exception('Presale, NFTs Remaining: {}, Required: {}'.format(nft_metadata.get_remaining(), payment['nfts']))
 
-        if payment['nfts'] < 1 or payment['nfts'] > max_per_tx:
+        if payment['nfts'] < 1:
             logger.error('Presale, Invalid NFTs requested: {}'.format(payment['nfts']))
             raise Exception('Presale, Invalid NFTs requested: {}'.format(payment['nfts']))
 
@@ -781,8 +780,7 @@ def process_incoming_payments(cardano: Cardano,
                               policy_name: str,
                               drop_name: str,
                               metadata_set_file: str,
-                              prices: Dict[int, int],
-                              max_per_tx: int) -> None:
+                              prices: Dict[int, int]) -> None:
     """
     Listing for incoming payments and mint NFT to the address the payment came
     from.  NFTs are minted in the order defined in metadata_set_file and assumes
@@ -799,73 +797,33 @@ def process_incoming_payments(cardano: Cardano,
     logger.info('process_incoming_payments, NFTs Remaining: {}'.format(nft_metadata.get_remaining()))
 
     while True:
-        #time.sleep(2)
         (utxos, total_lovelace) = cardano.query_utxos(minting_wallet,
                                                       [minting_wallet.get_payment_address(Wallet.ADDRESS_INDEX_MINT, delegated=True),
                                                        minting_wallet.get_payment_address(Wallet.ADDRESS_INDEX_MINT, delegated=False)])
         utxos = cardano.query_utxos_time(database, utxos)
         utxos.sort(key=lambda item : item['slot-no'])
 
-        matching_utxos = 0
-        for utxo in utxos:
-            if utxo['amount'] in prices and not sales.contains(utxo['tx-hash'], utxo['tx-ix']):
-                matching_utxos += 1
-
-        if matching_utxos == 0:
-            logger.debug('process_incoming_payments, Waiting for a new matching UTXO')
+        if len(utxos) == 0:
             time.sleep(30)
             continue
 
-        if nft_metadata.get_remaining() > 0:
-            if len(utxos) > 0:
-                # There are NFTs available.  So go find a UTXO that NFTs can be minted to.
-                # Collect incoming utxos that match a payment and batch them together for processing
-                input_utxos = []
-                nfts_to_mint = 0
+        utxos_processed = 0
+        for utxo in utxos:
+            if sales.contains(utxo['tx-hash'], utxo['tx-ix']):
+                continue
 
-                # search for UTXOs that the full requested amount can be fulfilled
-                for utxo in utxos:
-                    if sales.contains(utxo['tx-hash'], utxo['tx-ix']):
-                        # If already processed this UTXO then skip it.
-                        continue
-
-                    if utxo['amount'] in prices:
-                        num_nfts = prices[utxo['amount']]
-                        if num_nfts + nfts_to_mint <= nft_metadata.get_remaining() and num_nfts + nfts_to_mint <= max_per_tx:
-                            logger.info('RX UTXO {}: {} lovelace'.format(utxo['tx-hash'], utxo['amount']))
-                            logger.info('Request {} NFTs'.format(num_nfts))
-                            input_utxos.append({'utxo': utxo, 'count': num_nfts, 'refund': 0})
-                            logger.debug('Queue For Mint, UTXO {} = {} NFTs, refund: {}'.format(utxo['tx-hash'], num_nfts, 0))
-                            nfts_to_mint += num_nfts
-                        else:
-                            # reached the maximum amount that can be processed
-                            # or that is available.  Check to see if a partial
-                            # amount can be granted
-                            if nfts_to_mint == 0:
-                                # This could happen on the last mint transaction
-                                if num_nfts > nft_metadata.get_remaining():
-                                    price_per_nft = utxo['amount'] / num_nfts
-                                    refund_nfts = num_nfts - nft_metadata.get_remaining()
-                                    refund_price = int(refund_nfts * price_per_nft)
-                                    num_nfts = nft_metadata.get_remaining()
-                                    input_utxos.append({'utxo': utxo, 'count': num_nfts, 'refund': refund_price})
-                                    nfts_to_mint += num_nfts
-                                    logger.debug('Queue For Mint, UTXO {} = {} NFTs, refund: {}'.format(utxo['tx-hash'], num_nfts, refund_price))
-                                else:
-                                    logger.error("Configuration error: max_per_tx < num requested for price")
-                                    raise Exception("Configuration error: max_per_tx < num requested for price")
-                            break
-                    else :
-                        # Don't know what to do this this UTXO
-                        logger.warning('RX UTXO (Invalid Price) {}: {} lovelace'.format(utxo['tx-hash'], utxo['amount']))
-
-                # by now there should be something to mint.  If not then that means a
-                # UTXO was received that did not have a match to any payment price.
-                if nfts_to_mint > 0:
-                    logger.debug('Mint {} NFTs for {} queued UTXOs'.format(nfts_to_mint, len(input_utxos)))
-                    # Mint the NFTs requested
+            if nft_metadata.get_remaining() > 0:
+                if utxo['amount'] in prices:
+                    nfts_requested = prices[utxo['amount']]
+                    refund_price = 0
+                    nfts_to_grant = nfts_requested
+                    if nfts_requested > nft_metadata.get_remaining():
+                        price_per_nft = utxo['amount'] /prices[utxo['amount']]
+                        nfts_to_grant = nft_metadata.get_remaining()
+                        nfts_to_refund = nfts_requested - nfts_to_grant
+                        refund_price = int(nfts_to_refund * price_per_nft)
                     nft_metadata_files = []
-                    for i in range(0, nfts_to_mint):
+                    for i in range(0, nfts_to_grant):
                         mdfile = nft_metadata.peek_next_file()
                         nft_metadata_files.append(mdfile)
                         logger.debug('Merging NFT metadata: {}'.format(mdfile))
@@ -873,50 +831,32 @@ def process_incoming_payments(cardano: Cardano,
                     policy_id = cardano.get_policy_id(policy_name)
                     merged_metadata_file = Nft.merge_metadata_files(policy_id,
                                                                     nft_metadata_files)
-
-                    if not batch_mint_next_nft_in_series(cardano,
-                                                         database,
-                                                         minting_wallet,
-                                                         policy_name,
-                                                         input_utxos,
-                                                         merged_metadata_file,
-                                                         sales):
-                        nft_metadata.revert()
-                        logger.error('process_incoming_payments, Fail to mint')
-                    else:
+                    utxos_processed += 1
+                    if batch_mint_next_nft_in_series(cardano,
+                                                     database,
+                                                     minting_wallet,
+                                                     policy_name,
+                                                     [{'utxo': utxo, 'count': nfts_to_grant, 'refund': refund_price}],
+                                                     merged_metadata_file,
+                                                     sales):
                         nft_metadata.commit()
                         logger.info('Mint complete')
                         logger.info('Monitor Incoming Payments on: {}'.format(minting_wallet.get_payment_address(Wallet.ADDRESS_INDEX_MINT)))
                         logger.info('process_incoming_payments, NFTs Remaining: {}'.format(nft_metadata.get_remaining()))
+                    else:
+                        nft_metadata.revert()
+                        logger.error('process_incoming_payments, Fail to mint')
                     sales.commit()
-                else:
-                    # The UTXO is being processed
-                    pass
-        else:
-            # No NFTs available.  Any UTXO that matches a payment amount will be
-            # refunded
-            input_utxos = []
-
-            # Copy the UTXOs that match a payment amount
-            for utxo in utxos:
-                if sales.contains(utxo['tx-hash'], utxo['tx-ix']):
-                    # If already processed this UTXO then skip it.
-                    continue
-
-                if utxo['amount'] in prices:
+            else:
+                # Give a refund. Could refund as little as 1.2 ADA.
+                # Just round up to 2 ADA.
+                if utxo['amount'] > 2000000:
                     logger.debug('Queue For Refund, UTXO {} = {} NFTs, refund: {}'.format(utxo['tx-hash'], 0, utxo['amount']))
-                    input_utxos.append({'utxo': utxo, 'count': 0})
-
-            # Give the refund
-            for item in input_utxos:
-                logger.info("Refund: {} = {}".format(item['utxo']['tx-hash'], item['utxo']['amount']))
-                if not refund_payment(cardano, database, minting_wallet, item['utxo'], sales):
-                    logger.error('processing_incoming_payments, Fail to refund')
-                else:
-                    logger.info('processing_incoming_payments, Refund complete.')
+                    item = {'utxo': utxo, 'count': 0}
+                    utxos_processed += 1
+                    if not refund_payment(cardano, database, minting_wallet, item['utxo'], sales):
+                        logger.error('processing_incoming_payments, Fail to refund')
+                    else:
+                        logger.info('processing_incoming_payments, Refund complete.')
+        if utxos_processed == 0:
             time.sleep(30)
-
-
-    logger.info('!!!!!!!!!!!!!!!!!!!!!!!!')
-    logger.info('!!! MINTING COMPLETE !!!')
-    logger.info('!!!!!!!!!!!!!!!!!!!!!!!!')

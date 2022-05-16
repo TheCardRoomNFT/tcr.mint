@@ -1,0 +1,24 @@
+{
+    "series": 1,
+    "drop-name": "tn_project1",
+    "init-nft-id": 1,
+    "token-name": "TNx{:03}x{:04}x{}",
+    "nft-name": "Test Net {}.{} [{}/{}]",
+    "total": 100,
+    "output-width": 350,
+    "output-height": 350,
+    "profit-wallet":"tbd",
+    "prices": {
+        "5000000": 1,
+        "10000000": 3,
+        "20000000": 10
+    },
+    "layer-sets": [
+        {
+            "file": "layerset1.json",
+            "weight": 100
+        }
+    ],
+    "self": "nft/testnet/tn_project1/tn_project1_metametadata.json",
+    "policy": "tn_project_policy1"
+}

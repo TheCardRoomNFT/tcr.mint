@@ -103,12 +103,19 @@ mutation_type_lut = {
     'mellow yellow': 'shroom'
 }
 
-def get_collection():
+def get_mutate_requests_collection():
     client = pymongo.MongoClient(CONNECTION_STRING)
     database = client['thecardroom']
     collection = database['mutate_requests']
 
-    return collection.find()
+    return collection
+
+def get_mutants_collection():
+    client = pymongo.MongoClient(CONNECTION_STRING)
+    database = client['thecardroom']
+    collection = database['mutants']
+
+    return collection
 
 # Creates the normies package.
 #
@@ -153,7 +160,7 @@ def process_requests(network: str, wallet_name: str) -> None:
     sync_progress = database.query_sync_progress()
     logger.info('Cardano Node Tip Slot: {}'.format(tip_slot))
     logger.info(' Database Latest Slot: {}'.format(latest_slot))
-    logger.info('Sync Progress: {}'.format(sync_progress))
+    logger.info('        Sync Progress: {}'.format(sync_progress))
     logger.info('')
     logger.info('Payment address: {}'.format(wallet.get_payment_address(Wallet.ADDRESS_INDEX_MUTATE_REQUEST)))
 
@@ -163,9 +170,16 @@ def process_requests(network: str, wallet_name: str) -> None:
                                                   [wallet.get_payment_address(addr_index, delegated=True),
                                                    wallet.get_payment_address(addr_index, delegated=False)])
     for utxo in utxos:
-        inputs = database.query_utxo_inputs(utxo['tx-hash'])
-        utxo['from'] = inputs[0]['address']
-        utxo['from_stake'] = database.query_stake_address(utxo['from'])
+        logger.info('UTXO: txid = {}, amount = {}'.format(utxo['tx-hash'], utxo['amount']))
+        if utxo['amount'] == MINT_PAYMENT:
+            # No need to query transactions that don't match the mint amount
+            inputs = database.query_utxo_inputs(utxo['tx-hash'])
+            utxo['from'] = inputs[0]['address']
+            utxo['from_stake'] = database.query_stake_address(utxo['from'])
+            logger.info('UTXO: from stake= {}'.format(utxo['from_stake']))
+        else:
+            utxo['from'] = None
+            utxo['from_stake'] = None
 
     # Setup directories for output files
     if not os.path.exists('normie_pkg'):
@@ -178,9 +192,14 @@ def process_requests(network: str, wallet_name: str) -> None:
     normies_pkg = []
     # Process the request and build the mutation package
     logger.info('Mutation Address: {}'.format(wallet.get_payment_address(addr_index)))
-    requests = get_collection()
+    mutate_requests_collection = get_mutate_requests_collection()
+    requests = mutate_requests_collection.find({'processed': False})
 
     for r in requests:
+        if 'processed' in r and r['processed'] == True:
+            logger.info('Skip: {}:\r\n{}/{}'.format(r['from'], r['normie_asset_id'], r['mutation_asset_id']))
+            continue
+
         logger.info('Process: {}:\r\n{}/{}'.format(r['from'], r['normie_asset_id'], r['mutation_asset_id']))
         normie_owner = database.query_owner_by_fingerprint(r['normie_asset_id'])
         mutation_owner = database.query_owner_by_fingerprint(r['mutation_asset_id'])
@@ -221,10 +240,13 @@ def process_requests(network: str, wallet_name: str) -> None:
         # remove this one from the list so it doesn't get processed more than
         # once
         utxos.remove(payment)
-
         if payment['amount'] != MINT_PAYMENT or len(payment['assets']) != 0:
             logger.error('Invalid payment: {} / {}'.format(payment['amount'], payment['assets']))
             continue
+
+        # update the request
+        mutate_requests_collection.update_one({'_id': r['_id']},
+                                              {'$set': {'processed': True}})
 
         cid = normie_md[721][normie_policy][normie_token_name]['image'][7:]
         download_url = 'https://infura-ipfs.io/ipfs/{}'.format(cid)
@@ -289,11 +311,11 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
     tip_slot = tip['slot']
     logger.info('Cardano Node Tip Slot: {}'.format(tip_slot))
     logger.info(' Database Latest Slot: {}'.format(latest_slot))
-    logger.info('Sync Progress: {}'.format(sync_progress))
+    logger.info('        Sync Progress: {}'.format(sync_progress))
     logger.info('')
-    logger.info('Mutants File: {}'.format(mutants_file))
-    logger.info('Policy Name: {}'.format(policy_name))
-    logger.info('Policy ID: {}'.format(cardano.get_policy_id(policy_name)))
+    logger.info('  Mutants File: {}'.format(mutants_file))
+    logger.info('   Policy Name: {}'.format(policy_name))
+    logger.info('     Policy ID: {}'.format(cardano.get_policy_id(policy_name)))
     logger.info('Minting Wallet: {}'.format(cardano.get_policy_owner(policy_name)))
 
     sales = Sales(cardano.get_network(), policy_name)
@@ -399,6 +421,7 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
         txid = tcr.tcr.mint_nft_external(cardano, database,
                                          minting_wallet, Wallet.ADDRESS_INDEX_MUTATE_REQUEST,
                                          policy_name, input_utxos, metadata_file, sales)
+        entery = {'txid': txid}
         logger.info('NFT Minted, TXID: {}'.format(txid))
         logger.info('')
 
