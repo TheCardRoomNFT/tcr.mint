@@ -1,0 +1,28 @@
+{
+    "name": "Layer 6",
+    "width": 400,
+    "height": 400,
+    "images": [
+        {
+            "properties": {
+                "triangle": "one"
+            },
+            "weight": 33,
+            "image": "art/triangle1.png"
+        },
+        {
+            "properties": {
+                "triangle": "two"
+            },
+            "weight": 33,
+            "image": "art/triangle2.png"
+        },
+        {
+            "properties": {
+                "triangle": "three"
+            },
+            "weight": 34,
+            "image": "art/triangle3.png"
+        }
+    ]
+}

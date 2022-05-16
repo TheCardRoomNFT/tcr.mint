@@ -1,0 +1,22 @@
+{
+    "name": "Layer 1",
+    "width": 400,
+    "height": 400,
+    "images": [
+        {
+            "properties": {
+                "publisher": "https://testnet.io/",
+                "description": "The Description",
+                "artist": "Test Net",
+                "attribute1": "Attribute Value One",
+                "attribute2": "Attribute Value Two",
+                "attribute3": "Attribute Value Three",
+                "attribute4": "Attribute Value Four",
+                "attribute5": "Attribute Value Five",
+                "id": 0
+            },
+            "weight": 100,
+            "image": null
+        }
+    ]
+}

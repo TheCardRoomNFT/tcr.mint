@@ -1,0 +1,28 @@
+{
+    "name": "Layer 5",
+    "width": 400,
+    "height": 400,
+    "images": [
+        {
+            "properties": {
+                "circle": "one"
+            },
+            "weight": 33,
+            "image": "art/circle1.png"
+        },
+        {
+            "properties": {
+                "circle": "two"
+            },
+            "weight": 34,
+            "image": "art/circle2.png"
+        },
+        {
+            "properties": {
+                "circle": "three"
+            },
+            "weight": 33,
+            "image": "art/circle3.png"
+        }
+    ]
+}
