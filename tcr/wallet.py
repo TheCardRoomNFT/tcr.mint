@@ -45,7 +45,8 @@ class Wallet:
     ADDRESS_INDEX_ROOT = 0
     ADDRESS_INDEX_MINT = 1
     ADDRESS_INDEX_PRESALE = 2
-    ADDRESS_INDEX_MUTATE_REQUEST = 3
+    ADDRESS_INDEX_ROYALTY = 3
+    ADDRESS_INDEX_MUTATE_REQUEST = 4
 
     def __init__(self,
                  name: str,
@@ -85,27 +86,43 @@ class Wallet:
 
         return self.name
 
+    def get_available_signing_keys(self):
+        addresses = [Wallet.ADDRESS_INDEX_ROOT,
+                     Wallet.ADDRESS_INDEX_MINT,
+                     Wallet.ADDRESS_INDEX_PRESALE,
+                     Wallet.ADDRESS_INDEX_ROYALTY,
+                     Wallet.ADDRESS_INDEX_MUTATE_REQUEST]
+        keys = []
+        for address in addresses:
+            if self.address_exists(address):
+                keys.append(self.get_signing_key_file(address))
+
+        return keys
+
+    def address_exists(self, idx: int):
+        if not os.path.isfile(self.signing_key_file_base.format(idx)):
+            return False
+
+        if not os.path.isfile(self.verification_key_file_base.format(idx)):
+            return False
+
+        if not os.path.isfile(self.payment_address_file_base.format(idx)):
+            return False
+
+        if not os.path.isfile(self.delegated_payment_address_file_base.format(idx)):
+            return False
+
+        return True
+
     def exists(self) -> bool:
         """
         Check to make sure the default files exist.
         """
 
-        if not os.path.isfile(self.signing_key_file_base.format(0)):
+        if not self.address_exists(Wallet.ADDRESS_INDEX_ROOT):
             return False
 
-        if not os.path.isfile(self.verification_key_file_base.format(0)):
-            return False
-
-        if not os.path.isfile(self.payment_address_file_base.format(0)):
-            return False
-
-        if not os.path.isfile(self.signing_key_file_base.format(1)):
-            return False
-
-        if not os.path.isfile(self.verification_key_file_base.format(1)):
-            return False
-
-        if not os.path.isfile(self.payment_address_file_base.format(1)):
+        if not self.address_exists(Wallet.ADDRESS_INDEX_MINT):
             return False
 
         return True
@@ -153,31 +170,15 @@ class Wallet:
         (stake_private_key, stake_verification_key) = Wallet.generate_stake_verification_key(root_private_key)
         if self.save_extra_files:
             Command.write_to_file(self.stake_private_key_file, stake_private_key)
+            stake_address = Wallet.generate_stake_address(self.network, stake_verification_key)
+            Command.write_to_file(self.stake_address_file, stake_address)
 
-        payment_address = Wallet.generate_payment_address(self.network, payment_verification_key)
-        self.payment_address = payment_address
-        fname = self.payment_address_file_base.format(idx)
-        Command.write_to_file(fname, payment_address)
-
-        delegated_payment_address = Wallet.generate_delegated_payment_address(stake_verification_key, payment_address)
-        self.delegated_payment_address = delegated_payment_address
-        fname = self.delegated_payment_address_file_base.format(idx)
-        Command.write_to_file(fname, delegated_payment_address)
-
-        # Stake address not used.  Maybe later?
-        #stake_address = Wallet.generate_stake_address(self.network, stake_verification_key)
-        #Command.write_to_file(self.stake_address_file, stake_address)
-
-        self.create_signing_key_file(idx)
-        self.create_verification_key_file(idx)
-
-        # Then create address index 1
-        idx = 1
-        self.setup_address(idx)
+        self.setup_address(Wallet.ADDRESS_INDEX_ROOT)
+        self.setup_address(Wallet.ADDRESS_INDEX_MINT)
         return self.exists()
 
     def setup_address(self,
-                      idx: int) -> None:
+                      idx: int) -> bool:
         """
         Create new addresses for the specied index.
 
@@ -191,12 +192,12 @@ class Wallet:
             fname = self.payment_private_key_file_base.format(idx)
             Command.write_to_file(fname, payment_private_key)
 
+            (stake_private_key, stake_verification_key) = Wallet.generate_stake_verification_key(root_private_key)
+
             payment_address = Wallet.generate_payment_address(self.network, payment_verification_key)
             self.payment_address = payment_address
             fname = self.payment_address_file_base.format(idx)
             Command.write_to_file(fname, payment_address)
-
-            (stake_private_key, stake_verification_key) = Wallet.generate_stake_verification_key(root_private_key)
 
             delegated_payment_address = Wallet.generate_delegated_payment_address(stake_verification_key, payment_address)
             self.delegated_payment_address = delegated_payment_address
@@ -205,6 +206,8 @@ class Wallet:
 
             self.create_signing_key_file(idx)
             self.create_verification_key_file(idx)
+
+        return self.address_exists(idx)
 
     def get_payment_address(self,
                             idx: int,

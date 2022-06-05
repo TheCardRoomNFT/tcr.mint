@@ -56,16 +56,16 @@ potency_lut = {
 }
 
 runtime_lut = {
-    'low': 'short',
-    'medium-low': 'short',
-    'medium': 'medium',
-    'medium-high': 'long',
-    'high': 'extra long',
+    'low': '20 iterations',
+    'medium-low': '50 iterations',
+    'medium': '100 iterations',
+    'medium-high': '200 iterations',
+    'high': '400 iterations',
 }
 
 resolution_lut = {
-    'low': '2x',
-    'medium-low': '4x',
+    'low': '1x',
+    'medium-low': '2x',
     'medium': '4x',
     'medium-high': '6x',
     'high': '8x',
@@ -192,30 +192,42 @@ def process_requests(network: str, wallet_name: str) -> None:
     normies_pkg = []
     # Process the request and build the mutation package
     logger.info('Mutation Address: {}'.format(wallet.get_payment_address(addr_index)))
+
     mutate_requests_collection = get_mutate_requests_collection()
     requests = mutate_requests_collection.find({'processed': False})
-
     for r in requests:
-        if 'processed' in r and r['processed'] == True:
-            logger.info('Skip: {}:\r\n{}/{}'.format(r['from'], r['normie_asset_id'], r['mutation_asset_id']))
+        logger.info('')
+        logger.info('Request: {}'.format(r['_id']))
+        logger.info('                  Date: {}'.format(r['date']))
+        logger.info('       Normie Asset ID: {}'.format(r['normie_asset_id']))
+        logger.info('     Mutation Asset ID: {}'.format(r['mutation_asset_id']))
+        logger.info('                  From: {}'.format(r['from']))
+        logger.info('             Processed: {}'.format(r['processed']))
+        if r['processed'] == True:
+            logger.error('Already processed: {}:\r\n{}/{}'.format(r['from'], r['normie_asset_id'], r['mutation_asset_id']))
             continue
 
-        logger.info('Process: {}:\r\n{}/{}'.format(r['from'], r['normie_asset_id'], r['mutation_asset_id']))
+        logger.info('Process: {}, from: {}'.format(r['_id'], r['from']))
+        logger.info(' Assets: {}/{}'.format(r['normie_asset_id'], r['mutation_asset_id']))
         normie_owner = database.query_owner_by_fingerprint(r['normie_asset_id'])
+        logger.info('Normie Owner: {}'.format(normie_owner))
         mutation_owner = database.query_owner_by_fingerprint(r['mutation_asset_id'])
+        logger.info('Mutation Owner: {}'.format(mutation_owner))
 
         if normie_owner != mutation_owner:
             logger.error('Owner mismatch for {}: {} != {}'.format(r['from'], r['normie_asset_id'], r['mutation_asset_id']))
             continue
 
         (normie_policy, normie_token_name, normie_md) = database.query_nft_metadata(r['normie_asset_id'])
+        logger.info('Normie Policy: {}'.format(normie_policy))
         if normie_policy == None or normie_md == None:
             logger.error('Normie asset policy / metadata not found: {}/{}'.format(normie_policy, normie_md))
             continue
 
         (mutation_policy, mutation_token_name, mutation_md) = database.query_nft_metadata(r['mutation_asset_id'])
+        logger.info('Mutation Policy: {}'.format(mutation_policy))
         if mutation_policy == None or mutation_md == None:
-            logger.error('Normie asset policy / metadata not found: {}/{}'.format(mutation_policy, mutation_md))
+            logger.error('Mutation asset policy / metadata not found: {}/{}'.format(mutation_policy, mutation_md))
             continue
 
         if mutation_policy != '7135025a3c23035cdcff4ef8ae3849248afd369466ea1abef61a4157':
@@ -249,6 +261,13 @@ def process_requests(network: str, wallet_name: str) -> None:
                                               {'$set': {'processed': True}})
 
         cid = normie_md[721][normie_policy][normie_token_name]['image'][7:]
+        if 'files' in normie_md[721][normie_policy][normie_token_name]:
+            files = normie_md[721][normie_policy][normie_token_name]['files']
+            for file in files:
+                if file['mediaType'].startswith('image/'):
+                    cid = file['src'][7:]
+                    break
+
         download_url = 'https://infura-ipfs.io/ipfs/{}'.format(cid)
         logger.info('Download Normie: {}'.format(download_url))
 
@@ -261,25 +280,13 @@ def process_requests(network: str, wallet_name: str) -> None:
         flavor = mutation_md[721][mutation_policy][mutation_token_name]['flavor']
         mutation = mutation_md[721][mutation_policy][mutation_token_name]['mutation']
         potency = mutation_md[721][mutation_policy][mutation_token_name]['potency']
-        base_text = character + ' ' + flavor + ' ' + mutation
-
-        vqgan_text = ''
-        if mutation_type_lut[mutation] == 'acid':
-            vqgan_text = base_text + ' vibrant detailed'
-        elif mutation_type_lut[mutation] == 'capsule' or mutation_type_lut[mutation] == 'pill':
-            vqgan_text = base_text
-        elif mutation_type_lut[mutation] == 'combo':
-            vqgan_text = base_text + ' psychedelic 3d'
-        elif mutation_type_lut[mutation] == 'shroom':
-            vqgan_text = base_text + ' unreal engine'
-        else:
-            logger.error('WUT?')
-            continue
+        vqgan_text = character + ' ' + flavor + ' ' + mutation
 
         image_file = io.BytesIO(fd.read())
         im = PIL.Image.open(image_file)
         im.save(subdir + '/' + r['normie_asset_id'] + '.png', format='png')
         normie = {
+            'request_id': str(r['_id']),
             'from': payment['from'],
             'tx': '{}:{}'.format(payment['tx-hash'], payment['tx-ix']),
             'potency': potency_lut[potency],
@@ -294,9 +301,6 @@ def process_requests(network: str, wallet_name: str) -> None:
 
     with open('{}/normies.json'.format(subdir), 'w') as f:
         f.write(json.dumps(normies_pkg, indent=4))
-
-    #shutil.make_archive(subdir, 'zip', subdir)
-    #logger.info('Normies Package: {}.zip'.format(subdir))
 
 def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
     # General setup
@@ -335,8 +339,7 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
 
     addr_index = Wallet.ADDRESS_INDEX_MUTATE_REQUEST
     (utxos, total_lovelace) = cardano.query_utxos(minting_wallet,
-                                                  [minting_wallet.get_payment_address(addr_index, delegated=True),
-                                                   minting_wallet.get_payment_address(addr_index, delegated=False)])
+                                                  [minting_wallet.get_payment_address(addr_index, delegated=True)])
     for utxo in utxos:
         inputs = database.query_utxo_inputs(utxo['tx-hash'])
         utxo['from'] = inputs[0]['address']
@@ -368,7 +371,15 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
         thumbnail_filename = '{}/thumbnail_{}'.format(relative_dir, mutant['mutant-image'])
         logger.info('Generating Thumbnail: {}'.format(thumbnail_filename))
         im = im.resize(newsize)
-        im.save(thumbnail_filename, format='jpeg')
+        media_type = None
+        extension = None
+        if mutant['mutant-image'].endswith('jpg') or mutant['mutant-image'].endswith('jpeg'):
+            media_type = 'jpeg'
+            extension = 'jpg'
+        elif mutant['mutant-image'].endswith('png'):
+            media_type = 'png'
+            extension = 'png'
+        im.save(thumbnail_filename, format=media_type)
         width, height = im.size
         logger.info('Thumbnail Size: {} x {}'.format(width, height))
 
@@ -388,9 +399,9 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
                         'name': mutant['mutant-name'],
                         'files': [
                             {
-                                'name': '{}.jpg'.format(token_name.lower()),
+                                'name': '{}.{}'.format(token_name.lower(), extension),
                                 'src': 'ipfs://{}'.format(fullsize_ipfs_hash),
-                                'mediaType': 'image/jpeg'
+                                'mediaType': 'image/{}'.format(media_type)
                             }
                         ],
                         'image': 'ipfs://{}'.format(thumbnail_ipfs_hash),
@@ -409,10 +420,10 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
             file.write(json.dumps(mutant_metadata, indent=4))
 
         # find the utxo to use
-        input_utxos = []
+        input_utxo = None
         for utxo in utxos:
             if utxo['amount'] == MINT_PAYMENT and utxo['from'] == mutant['from']:
-                input_utxos = [{'utxo': utxo, 'count': 1, 'refund': 0}]
+                input_utxo = {'utxo': utxo, 'count': 1, 'refund': 0}
                 utxos.remove(utxo)
                 logger.info('Input UTXO: {}#{}'.format(utxo['tx-hash'], utxo['tx-ix']))
                 break
@@ -420,13 +431,29 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
         # mint
         txid = tcr.tcr.mint_nft_external(cardano, database,
                                          minting_wallet, Wallet.ADDRESS_INDEX_MUTATE_REQUEST,
-                                         policy_name, input_utxos, metadata_file, sales)
-        entery = {'txid': txid}
+                                         policy_name, input_utxo, metadata_file, sales)
         logger.info('NFT Minted, TXID: {}'.format(txid))
+        if txid == None:
+            logger.error('txid == None')
+            break
+
+        entry = {
+            'request_id': mutant['request_id'],
+            'payment_txid': input_utxo['utxo']['tx-hash'],
+            'normie': mutant['normie-asset-id'],
+            'mutation': mutant['mutation-asset-id'],
+            'mutant_thumbnail': 'ipfs://{}'.format(thumbnail_ipfs_hash),
+            'mutant_full': 'ipfs://{}'.format(fullsize_ipfs_hash),
+            'mint_txid': txid
+        }
+        mutants = get_mutants_collection()
+        result = mutants.insert_one(entry)
+        logger.info('Inserted ID = {}'.format(result.inserted_id))
         logger.info('')
 
 #
 # python3 -m tcr.mutate --wallet=tcr_mint
+# python3 -m tcr.mutate --policy=mutants --mutants=./normie_pkg/file
 #
 def main():
     parser = argparse.ArgumentParser(add_help=False)

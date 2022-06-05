@@ -494,6 +494,7 @@ def main():
         if token_name == None and confirm:
             has_tokens = True
 
+            logger.info('Search for tokens: {}'.format(policy_id))
             while has_tokens:
                 #burn all
                 token_names = []

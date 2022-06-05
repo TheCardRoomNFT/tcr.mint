@@ -88,6 +88,7 @@ def main():
         logger.info('   Root address = {}'.format(wallet.get_payment_address(Wallet.ADDRESS_INDEX_ROOT)))
         logger.info('   Mint address = {}'.format(wallet.get_payment_address(Wallet.ADDRESS_INDEX_MINT)))
         logger.info('Presale address = {}'.format(wallet.get_payment_address(Wallet.ADDRESS_INDEX_PRESALE)))
+        logger.info('Royalty address = {}'.format(wallet.get_payment_address(Wallet.ADDRESS_INDEX_ROYALTY)))
         logger.info(' Mutate address = {}'.format(wallet.get_payment_address(Wallet.ADDRESS_INDEX_MUTATE_REQUEST)))
         logger.info('  Stake address = {}'.format(stake_address))
 
