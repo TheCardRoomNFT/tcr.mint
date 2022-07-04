@@ -43,6 +43,7 @@ import shutil
 import pathlib
 import pymongo
 import tcr.addresses
+import http
 
 CONNECTION_STRING = tcr.addresses.addresses['mongodb']
 MINT_PAYMENT = 12000000
@@ -64,8 +65,8 @@ runtime_lut = {
 }
 
 resolution_lut = {
-    'low': '1x',
-    'medium-low': '2x',
+    'low': '2x',
+    'medium-low': '4x',
     'medium': '4x',
     'medium-high': '6x',
     'high': '8x',
@@ -116,6 +117,39 @@ def get_mutants_collection():
     collection = database['mutants']
 
     return collection
+
+def extract_cid(url: str) -> str:
+    cid = url[7:]
+    if cid.startswith('ipfs/'):
+        cid = cid[5:]
+
+    return cid
+
+def download_normie_image(logger, url: str):
+    image_file = None
+
+    for i in range(0, 5):
+        logger.info('Download attempt: {}'.format(i+1))
+
+        try:
+            fd = urllib.request.urlopen(url)
+            if fd.status != 200:
+                logger.error('HTTP Error: {}'.format(fd.status))
+                continue
+            image_file = io.BytesIO(fd.read())
+        except urllib.error.HTTPError as e:
+            logger.error('HTTPError: {}'.format(e))
+            continue
+        except http.client.IncompleteRead as ire:
+            logger.error('Incomplete Read')
+            continue
+
+        break
+
+    if image_file == None:
+        raise Exception('Failed to download: {}'.format(url))
+
+    return image_file
 
 # Creates the normies package.
 #
@@ -195,6 +229,7 @@ def process_requests(network: str, wallet_name: str) -> None:
 
     mutate_requests_collection = get_mutate_requests_collection()
     requests = mutate_requests_collection.find({'processed': False})
+    processed_ids = []
     for r in requests:
         logger.info('')
         logger.info('Request: {}'.format(r['_id']))
@@ -256,25 +291,17 @@ def process_requests(network: str, wallet_name: str) -> None:
             logger.error('Invalid payment: {} / {}'.format(payment['amount'], payment['assets']))
             continue
 
-        # update the request
-        mutate_requests_collection.update_one({'_id': r['_id']},
-                                              {'$set': {'processed': True}})
-
-        cid = normie_md[721][normie_policy][normie_token_name]['image'][7:]
+        cid = extract_cid(normie_md[721][normie_policy][normie_token_name]['image'])
         if 'files' in normie_md[721][normie_policy][normie_token_name]:
             files = normie_md[721][normie_policy][normie_token_name]['files']
             for file in files:
                 if file['mediaType'].startswith('image/'):
-                    cid = file['src'][7:]
+                    cid = extract_cid(file['src'])
                     break
 
-        download_url = 'https://infura-ipfs.io/ipfs/{}'.format(cid)
+        download_url = 'https://ipfs.io/ipfs/{}'.format(cid)
         logger.info('Download Normie: {}'.format(download_url))
-
-        fd = urllib.request.urlopen(download_url)
-        if fd.status != 200:
-            logger.info('HTTP Error: {}'.format(fd.status))
-            continue
+        image_file = download_normie_image(logger, download_url)
 
         character = mutation_md[721][mutation_policy][mutation_token_name]['character']
         flavor = mutation_md[721][mutation_policy][mutation_token_name]['flavor']
@@ -282,7 +309,6 @@ def process_requests(network: str, wallet_name: str) -> None:
         potency = mutation_md[721][mutation_policy][mutation_token_name]['potency']
         vqgan_text = character + ' ' + flavor + ' ' + mutation
 
-        image_file = io.BytesIO(fd.read())
         im = PIL.Image.open(image_file)
         im.save(subdir + '/' + r['normie_asset_id'] + '.png', format='png')
         normie = {
@@ -297,10 +323,53 @@ def process_requests(network: str, wallet_name: str) -> None:
             'runtime': runtime_lut[potency],
             'resolution': resolution_lut[potency]
         }
+
+        # save database object id to update it later
+        processed_ids.append(r['_id'])
+
         normies_pkg.append(normie)
 
     with open('{}/normies.json'.format(subdir), 'w') as f:
         f.write(json.dumps(normies_pkg, indent=4))
+
+    # Update the database
+    for id in processed_ids:
+        logger.info('Mark Processed: {}'.format(id))
+        mutate_requests_collection.update_one({'_id': id},
+                                              {'$set': {'processed': True}})
+
+def get_media_type(logger: logging.Logger, image_filename: str) -> str:
+    media_type = None
+    extension = None
+
+    if image_filename.endswith('.jpg') or image_filename.endswith('.jpeg'):
+        media_type = 'jpeg'
+        extension = 'jpg'
+    elif image_filename.endswith('.png'):
+        media_type = 'png'
+        extension = 'png'
+    elif image_filename.endswith('.gif'):
+        media_type = 'gif'
+        extension = 'gif'
+    else:
+        logger.error('Unexpected file type: {}'.format(image_filename))
+        raise Exception('Unexpected file type: {}'.format(image_filename))
+
+    return (media_type, extension)
+
+def get_thumbnail_source(logger: logging.Logger, file1: str, file2: str) -> str:
+    (media_type, ext) = get_media_type(logger, file1)
+    if ext == 'jpg' or ext == 'png':
+        logger.info('Thumbnail Source: {}'.format(file1))
+        return file1
+
+    (media_type, ext) = get_media_type(logger, file2)
+    if ext == 'jpg' or ext == 'png':
+        logger.info('Thumbnail Source: {}'.format(file2))
+        return file2
+
+    logger.error('Thumbnail source not found')
+    raise('Thumbnail source not found')
 
 def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
     # General setup
@@ -350,35 +419,39 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
         mutants = json.load(file)
 
     for mutant in mutants:
-        logger.info('Processing: {}'.format(mutant['mutant-image']))
+        logger.info('Processing: {}'.format(mutant['mutant-name']))
 
-        # upload fullsize image to ipfs
+        # upload fullsize image 1 to ipfs
         projectid = tcr.addresses.addresses['ipfs'][policy_name]['project-id']
         projectsecret = tcr.addresses.addresses['ipfs'][policy_name]['project-secret']
-        full_filename = '{}/{}'.format(relative_dir, mutant['mutant-image'])
-        logger.info('Uploading Mutant: {}'.format(full_filename))
-        fullsize_ipfs_hash = tcr.ipfs.ipfs_upload(projectid, projectsecret, full_filename)
-        pin_state = tcr.ipfs.ipfs_pin(projectid, projectsecret, fullsize_ipfs_hash)
-        logger.info('Fullsize IPFS Hash: {}, pin = {}'.format(fullsize_ipfs_hash, pin_state))
+        full_filename_1 = '{}/{}'.format(relative_dir, mutant['mutant-image-1'])
+        logger.info('Uploading Mutant 1: {}'.format(full_filename_1))
+        fullsize_ipfs_hash_1 = tcr.ipfs.ipfs_upload(projectid, projectsecret, full_filename_1)
+        pin_state = tcr.ipfs.ipfs_pin(projectid, projectsecret, fullsize_ipfs_hash_1)
+        logger.info('Fullsize IPFS Hash 1: {}, pin = {}'.format(fullsize_ipfs_hash_1, pin_state))
+
+        # upload fullsize image 2 to ipfs if it exists
+        fullsize_ipfs_hash_2 = None
+        full_filename_2 = None
+        if mutant['mutant-image-2'] != None:
+            full_filename_2 = '{}/{}'.format(relative_dir, mutant['mutant-image-2'])
+            logger.info('Uploading Mutant 2: {}'.format(full_filename_2))
+            fullsize_ipfs_hash_2 = tcr.ipfs.ipfs_upload(projectid, projectsecret, full_filename_2)
+            pin_state = tcr.ipfs.ipfs_pin(projectid, projectsecret, fullsize_ipfs_hash_2)
+            logger.info('Fullsize IPFS Hash 2: {}, pin = {}'.format(fullsize_ipfs_hash_2, pin_state))
 
         # create thumbnail image
-        im = PIL.Image.open(full_filename)
+        thumbnail_source = get_thumbnail_source(logger, full_filename_1, full_filename_2)
+        im = PIL.Image.open(thumbnail_source)
         width, height = im.size
         logger.info('Original Size: {} x {}'.format(width, height))
         new_width = 512
         new_height = int(height * new_width / width)
         newsize = (new_width, new_height)
-        thumbnail_filename = '{}/thumbnail_{}'.format(relative_dir, mutant['mutant-image'])
+        thumbnail_filename = '{}/thumbnail_{}'.format(relative_dir, os.path.basename(thumbnail_source))
         logger.info('Generating Thumbnail: {}'.format(thumbnail_filename))
         im = im.resize(newsize)
-        media_type = None
-        extension = None
-        if mutant['mutant-image'].endswith('jpg') or mutant['mutant-image'].endswith('jpeg'):
-            media_type = 'jpeg'
-            extension = 'jpg'
-        elif mutant['mutant-image'].endswith('png'):
-            media_type = 'png'
-            extension = 'png'
+        (media_type, extension) = get_media_type(logger, thumbnail_source)
         im.save(thumbnail_filename, format=media_type)
         width, height = im.size
         logger.info('Thumbnail Size: {} x {}'.format(width, height))
@@ -386,10 +459,12 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
         # upload thumbnail image to ipfs
         logger.info('Uploading Thumbnail: {}'.format(thumbnail_filename))
         thumbnail_ipfs_hash = tcr.ipfs.ipfs_upload(projectid, projectsecret, thumbnail_filename)
-        pin_state = tcr.ipfs.ipfs_pin(projectid, projectsecret, fullsize_ipfs_hash)
-        logger.info('Thumbnail IPFS Hash: {}, pin = {}'.format(fullsize_ipfs_hash, pin_state))
+        pin_state = tcr.ipfs.ipfs_pin(projectid, projectsecret, thumbnail_ipfs_hash)
+        logger.info('Thumbnail IPFS Hash: {}, pin = {}'.format(thumbnail_ipfs_hash, pin_state))
 
         # generate metadata
+        (fullsize_media_type_1, fullsize_ext_1) = get_media_type(logger, full_filename_1)
+        (thumbnail_media_type, thumbnail_ext) = get_media_type(logger, thumbnail_filename)
         token_name = mutant['mutant-name'].replace(' ', '').replace('#', '')
         metadata_file = '{}/{}.json'.format(relative_dir, token_name)
         mutant_metadata = {
@@ -399,13 +474,15 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
                         'name': mutant['mutant-name'],
                         'files': [
                             {
-                                'name': '{}.{}'.format(token_name.lower(), extension),
-                                'src': 'ipfs://{}'.format(fullsize_ipfs_hash),
-                                'mediaType': 'image/{}'.format(media_type)
+                                'name': '{}.{}'.format(token_name.lower(), fullsize_ext_1),
+                                'src': 'ipfs://{}'.format(fullsize_ipfs_hash_1),
+                                'mediaType': 'image/{}'.format(fullsize_media_type_1)
                             }
                         ],
                         'image': 'ipfs://{}'.format(thumbnail_ipfs_hash),
+                        'mediaType': 'image/{}'.format(thumbnail_media_type),
                         'description': 'The Card Room - Mutants',
+                        'algorithm': mutant['algorithm'],
                         'normie': mutant['normie-asset-id'],
                         'mutation': mutant['mutation-asset-id'],
                         'website': 'https://thecardroom.io/'
@@ -414,6 +491,14 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
                 'version': '1.0'
             }
         }
+
+        if full_filename_2 != None:
+            (fullsize_media_type_2, fullsize_ext_2) = get_media_type(logger, full_filename_2)
+            mutant_metadata['721'][policy_id][token_name]['files'].append({
+                'name': '{}.{}'.format(token_name.lower(), fullsize_ext_2),
+                'src': 'ipfs://{}'.format(fullsize_ipfs_hash_2),
+                'mediaType': 'image/{}'.format(fullsize_media_type_2)
+            })
 
         logger.info('Writing Metadata: {}'.format(metadata_file))
         with open(metadata_file, 'w') as file:
@@ -427,6 +512,10 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
                 utxos.remove(utxo)
                 logger.info('Input UTXO: {}#{}'.format(utxo['tx-hash'], utxo['tx-ix']))
                 break
+
+        if input_utxo == None:
+            logger.error('Input UTXO not found.  Already minted? ')
+            continue
 
         # mint
         txid = tcr.tcr.mint_nft_external(cardano, database,
@@ -443,7 +532,7 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
             'normie': mutant['normie-asset-id'],
             'mutation': mutant['mutation-asset-id'],
             'mutant_thumbnail': 'ipfs://{}'.format(thumbnail_ipfs_hash),
-            'mutant_full': 'ipfs://{}'.format(fullsize_ipfs_hash),
+            'mutant_full': 'ipfs://{}'.format(fullsize_ipfs_hash_1),
             'mint_txid': txid
         }
         mutants = get_mutants_collection()
