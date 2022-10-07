@@ -1,0 +1,63 @@
+{
+    "name": "Layer 2",
+    "width": 400,
+    "height": 400,
+    "images": [
+        {
+            "properties": {
+                "background": "green"
+            },
+            "weight": 10,
+            "image": "art/bg1_green.png"
+        },
+        {
+            "properties": {
+                "background": "red"
+            },
+            "weight": 10,
+            "image": "art/bg2_red.png"
+        },
+        {
+            "properties": {
+                "background": "orange"
+            },
+            "weight": 10,
+            "image": "art/bg3_orange.png"
+        },
+        {
+            "properties": {
+                "background": "yellow"
+            },
+            "weight": 10,
+            "image": "art/bg4_yellow.png"
+        },
+        {
+            "properties": {
+                "background": "teal"
+            },
+            "weight": 15,
+            "image": "art/bg5_teal.png"
+        },
+        {
+            "properties": {
+                "background": "blue"
+            },
+            "weight": 15,
+            "image": "art/bg6_blue.png"
+        },
+        {
+            "properties": {
+                "background": "magenta"
+            },
+            "weight": 15,
+            "image": "art/bg7_magenta.png"
+        },
+        {
+            "properties": {
+                "background": "black"
+            },
+            "weight": 15,
+            "image": "art/bg8_black.png"
+        }
+    ]
+}

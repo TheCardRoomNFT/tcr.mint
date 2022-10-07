@@ -77,11 +77,15 @@ def main():
                                     help='Continuously send specified amount')
 
     parser.add_argument('--nft', required=False,
-                                    action='store',
-                                    type=str,
-                                    metavar='NAME',
-                                    default=None,
-                                    help='Full name of NFT to send')
+                                 action='store',
+                                 type=str,
+                                 metavar='NAME',
+                                 default=None,
+                                 help='Full name of NFT to send')
+    parser.add_argument('--setup', required=False,
+                                   action='store_true',
+                                   default=False,
+                                   help='Create wallet addresses')
     args = parser.parse_args()
     network = args.network
     src_name = args.src
@@ -90,6 +94,7 @@ def main():
     all = args.all
     nft = args.nft
     repeat = args.repeat
+    setup = args.setup
 
     if not network in tcr.command.networks:
         raise Exception('Invalid Network: {}'.format(network))
@@ -126,9 +131,28 @@ def main():
     else:
         dst_wallet = Wallet(dst_name, cardano.get_network())
 
-    if all == False and amount < 1000000:
+    if all == False and amount < 1000000 and nft == None and setup == False:
         logger.error("Amount too small: {}".format(amount))
         raise Exception("Amount too small: {}".format(amount))
+
+    if setup:
+        logger.info("SetUp Wallet: {}".format(src_wallet.get_name()))
+        result = True
+        if not src_wallet.address_exists(Wallet.ADDRESS_INDEX_PRESALE):
+            result = result and src_wallet.setup_address(Wallet.ADDRESS_INDEX_PRESALE)
+
+        if not src_wallet.address_exists(Wallet.ADDRESS_INDEX_ROYALTY):
+            result = result and src_wallet.setup_address(Wallet.ADDRESS_INDEX_ROYALTY)
+
+        if not src_wallet.address_exists(Wallet.ADDRESS_INDEX_MUTATE_REQUEST):
+            result = result and src_wallet.setup_address(Wallet.ADDRESS_INDEX_MUTATE_REQUEST)
+
+        if result:
+            logger.info('Wallet addresses setup')
+        else:
+            logger.error('Failed to setup wallet addresses')
+
+        return
 
     if not dst_wallet.exists():
         logger.error("Destination wallet missing: {}".format(dst_wallet.get_name()))
@@ -138,8 +162,7 @@ def main():
         logger.error("Source wallet missing: {}".format(src_wallet.get_name()))
         raise Exception("Source wallet missing: {}".format(src_wallet.get_name()))
 
-    cardano.dump_utxos_sorted(database, src_wallet)
-    if amount >= 0:
+    if amount > 0 or (amount == 0 and all == True):
         send_payment = True
         while send_payment:
             if amount > 0:
@@ -163,9 +186,37 @@ def main():
 
             send_payment = repeat
     elif nft != None:
-        tx_id = tcr.tcr.transfer_nft(cardano, src_wallet, {nft: 1}, dst_wallet)
+        if '.' not in nft:
+            # send all the NFTs matching the policy ID with minimum ADA
+            (utxos, total_lovelace) = cardano.query_utxos(src_wallet)
+            tx_nfts = {}
+            for utxo in utxos:
+                for asset in utxo['assets']:
+                    # TODO: figure out how to calculat the current size of a transaction
+                    # and if it would be too big or not.  For now, 300 assets seems
+                    # near the maximum.
+                    if len(tx_nfts) > 300:
+                        break
+
+                    if asset.startswith(nft):
+                        tx_nfts[asset] = utxo['assets'][asset]
+
+            if len(tx_nfts) > 0:
+                tx_id = tcr.tcr.transfer_nft(cardano, src_wallet, tx_nfts, dst_wallet)
+            else:
+                tx_id = None
+                logger.error('No matching NFT assets found')
+        else:
+            tx_id = tcr.tcr.transfer_nft(cardano, src_wallet, {nft: 1}, dst_wallet)
+
+        if tx_id == None:
+            logger.error('Failed to submit transaction')
+            return
+
         while not cardano.contains_txhash(dst_wallet, tx_id):
             time.sleep(5)
 
 if __name__ == '__main__':
     main()
+
+#python3 -m tcr.buybot --network=testnet --src=testnet1 --dst=testnet1 --all

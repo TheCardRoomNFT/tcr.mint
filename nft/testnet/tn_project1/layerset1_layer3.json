@@ -1,0 +1,42 @@
+{
+    "name": "Layer 3",
+    "width": 400,
+    "height": 400,
+    "images": [
+        {
+            "properties": {
+                "lines": "one"
+            },
+            "weight": 20,
+            "image": "art/lines1.png"
+        },
+        {
+            "properties": {
+                "lines": "two"
+            },
+            "weight": 20,
+            "image": "art/lines2.png"
+        },
+        {
+            "properties": {
+                "lines": "three"
+            },
+            "weight": 20,
+            "image": "art/lines3.png"
+        },
+        {
+            "properties": {
+                "lines": "four"
+            },
+            "weight": 20,
+            "image": "art/lines4.png"
+        },
+        {
+            "properties": {
+                "lines": "five"
+            },
+            "weight": 20,
+            "image": "art/lines5.png"
+        }
+    ]
+}

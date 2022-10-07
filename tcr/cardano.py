@@ -35,6 +35,7 @@ from tcr.wallet import Wallet
 import logging
 from tcr.database import Database
 import time
+import binascii
 
 logger = logging.getLogger('cardano')
 
@@ -90,6 +91,8 @@ class Cardano:
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_MINT, delegated=True),
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_PRESALE, delegated=False),
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_PRESALE, delegated=True),
+                                 wallet.get_payment_address(Wallet.ADDRESS_INDEX_ROYALTY, delegated=False),
+                                 wallet.get_payment_address(Wallet.ADDRESS_INDEX_ROYALTY, delegated=True),
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_MUTATE_REQUEST, delegated=False),
                                  wallet.get_payment_address(Wallet.ADDRESS_INDEX_MUTATE_REQUEST, delegated=True)])
 
@@ -114,7 +117,9 @@ class Cardano:
                     if cells[x] == '+':
                         if cells[x+1].isnumeric():
                             asset_amount = int(cells[x+1])
-                            asset_name = cells[x+2]
+                            asset = cells[x+2].split('.')
+                            asset_policy = asset[0]
+                            asset_name = asset_policy + '.' + binascii.unhexlify(asset[1]).decode('utf-8')
                             assets[asset_name] = asset_amount
 
                 tx_out_datum_hash = cells[len(cells) - 1]
@@ -227,21 +232,30 @@ class Cardano:
         minimum = 1000000
         count = assets.count('+')
         if count > 0:
-            minimum += 400000
-            minimum += (110000 * count)
+            minimum = 2000000 * count
 
         return minimum
-#        command = ['cardano-cli', 'transaction', 'calculate-min-required-utxo',
-#                   '--alonzo-era', '--protocol-params-file', self.protocol_parameters_file,
-#                   '--tx-out', '{}+{}{}'.format(address, amount, assets)]
-#
-#        output = Command.run(command, None)
-#        cells = output.split()
-#        if cells[0] != 'Lovelace':
-#            logger.error('Expected \'Lovelace\'')
-#            raise Exception('Expected \'Lovelace\'')
-#
-#        return int(cells[1])
+
+    def calculate_assets_min_utxo(self, address, assets):
+        assets_string = ''
+        for asset in assets:
+            if assets[asset] > 0:
+                components = asset.split('.')
+                policy_id = components[0]
+                token_name = components[1].encode().hex()
+                assets_string += '+{} {}.{}'.format(assets[asset], policy_id, token_name)
+
+        command = ['cardano-cli', 'transaction', 'calculate-min-required-utxo',
+                   '--protocol-params-file', self.protocol_parameters_file,
+                   '--tx-out', '{}+0{}'.format(address, assets_string)]
+
+        output = Command.run(command, None)
+        cells = output.split()
+        if cells[0] != 'Lovelace':
+            logger.error('Expected \'Lovelace\'')
+            raise Exception('Expected \'Lovelace\'')
+
+        return int(cells[1])
 
     def create_transfer_transaction_file(self,
                                          utxo_inputs,
@@ -254,12 +268,14 @@ class Cardano:
             command.append('--tx-in')
             command.append('{}#{}'.format(utxo['tx-hash'], utxo['tx-ix']))
 
-
         for address in address_outputs:
             assets_string = ''
             for asset in address['assets']:
                 if address['assets'][asset] > 0:
-                    assets_string += '+{} {}'.format(address['assets'][asset], asset)
+                    components = asset.split('.')
+                    policy_id = components[0]
+                    token_name = components[1].encode().hex()
+                    assets_string += '+{} {}.{}'.format(address['assets'][asset], policy_id, token_name)
 
             # Note that if the amount is zero (or just too small) but there is a
             # valid asset in the output then this transaction will fail when
@@ -274,8 +290,25 @@ class Cardano:
         output = Command.run(command, None)
         return output
 
+    def create_output_assets(self, input: Dict, nft_metadata_file: str):
+        nft_metadata = Nft.parse_metadata_file(nft_metadata_file)
+        token_names = nft_metadata['token-names']
+        policy_id = nft_metadata['policy-id']
+
+        if len(token_names) != input['count']:
+            logger.error("Token count mismatch.")
+            raise Exception('Token count mismatch')
+
+        count = input['count']
+        assets = {}
+        for i in range(0, count):
+            token_hex_name = token_names[i].encode().hex()
+            full_name = '{}.{}'.format(policy_id, token_hex_name)
+            assets[full_name] = 1
+        return assets
+
     def create_mint_nft_transaction_file(self,
-                                         input_utxos,
+                                         input,
                                          address_outputs,
                                          fee_amount,
                                          policy_name,
@@ -288,41 +321,14 @@ class Cardano:
         # address_outputs[0] = mint wallet address
         # address_outputs[1..len_input(utxos)] = purchaser address
 
-        if len(address_outputs) < 1 + len(input_utxos):
+        if len(address_outputs) < 2:
             logger.error('Address outputs too short, len = {}'.format(len(address_outputs)))
             raise Exception('Address outputs too short, len = {}'.format(len(address_outputs)))
 
-        nfts_to_mint = 0
-        for item in input_utxos:
-            nfts_to_mint += item['count']
+        nfts_to_mint = input['count']
         if nfts_to_mint != len(token_names):
-            logger.error('Mint count mismatch {} != {}'.format(len(nfts_to_mint, len(token_names))))
-            raise Exception('Mint count mismatch {} != {}'.format(len(nfts_to_mint, len(token_names))))
-
-        mint = ''
-        token_index = 0
-        address_index = 1 # index 0 is the project wallet so skip it
-
-        mint_map = {}
-        for item in input_utxos:
-            count = item['count']
-            key = item['utxo']['tx-hash']+'#'+str(item['utxo']['tx-ix'])
-            mint_map[key] = {}
-            for i in range(0, count):
-                if len(mint) > 0:
-                    mint += '+'
-                full_name = '{}.{}'.format(policy_id, token_names[token_index])
-                mint += '1 {}'.format(full_name)
-                # add the nft being minted to the output
-                address_outputs[address_index]['assets'][full_name] = 1
-                logger.debug('Mint {} to {}'.format(token_names[token_index], address_outputs[address_index]['address']))
-                if 'tokens' in mint_map[key]:
-                    mint_map[key]['tokens'].append(token_names[token_index])
-                else:
-                    mint_map[key]['address'] = address_outputs[address_index]['address']
-                    mint_map[key]['tokens'] = [token_names[token_index]]
-                token_index += 1
-            address_index += 1
+            logger.error('Mint count mismatch {} != {}'.format(nfts_to_mint, len(token_names)))
+            raise Exception('Mint count mismatch {} != {}'.format(nfts_to_mint, len(token_names)))
 
         invalid_hereafter = 0
         with open('policy/{}/{}.script'.format(self.network, policy_name), "r") as file:
@@ -333,9 +339,8 @@ class Cardano:
 
         command = ['cardano-cli', 'transaction', 'build-raw', '--fee', '{}'.format(fee_amount)]
 
-        for item in input_utxos:
-            command.append('--tx-in')
-            command.append('{}#{}'.format(item['utxo']['tx-hash'], item['utxo']['tx-ix']))
+        command.append('--tx-in')
+        command.append('{}#{}'.format(input['utxo']['tx-hash'], input['utxo']['tx-ix']))
 
         for address in address_outputs:
             assets_string = ''
@@ -349,6 +354,12 @@ class Cardano:
                 command.append('--tx-out')
                 command.append('{}+{}{}'.format(address['address'], address['amount'], assets_string))
 
+        mint_assets = self.create_output_assets(input, nft_metadata_file)
+        mint = ''
+        for asset in mint_assets:
+            mint += '{} {}+'.format(mint_assets[asset], asset)
+        mint = mint[0:len(mint)-1]
+
         command.extend(['--mint={}'.format(mint),
                         '--mint-script-file', 'policy/{}/{}.script'.format(self.network, policy_name),
                         '--metadata-json-file', nft_metadata_file,
@@ -356,7 +367,7 @@ class Cardano:
                         '--out-file', transaction_file])
 
         output = Command.run(command, None)
-        return (output, mint_map)
+        return output
 
     def create_mint_royalty_token_transaction_file(self,
                                                    input_utxo,
@@ -404,40 +415,12 @@ class Cardano:
         return output
 
     def calculate_min_required_utxo_mint(self,
-                                         input_utxos: List,
-                                         address_outputs: List,
-                                         nft_metadata_file: str):
-        nft_metadata = Nft.parse_metadata_file(nft_metadata_file)
-        policy_id = nft_metadata['policy-id']
-        token_names = nft_metadata['token-names']
+                                         outputs: List):
+        if len(outputs) < 2:
+            logger.error('Address outputs too short, len = {}'.format(len(outputs)))
+            raise Exception('Address outputs too short, len = {}'.format(len(outputs)))
 
-        # address_outputs[0] = mint wallet address
-        # address_outputs[1..len_input(utxos)] = purchaser address
-
-        if len(address_outputs) < 1 + len(input_utxos):
-            logger.error('Address outputs too short, len = {}'.format(len(address_outputs)))
-            raise Exception('Address outputs too short, len = {}'.format(len(address_outputs)))
-
-        nfts_to_mint = 0
-        for item in input_utxos:
-            nfts_to_mint += item['count']
-        if nfts_to_mint != len(token_names):
-            logger.error('Mint count mismatch {} != {}'.format(len(nfts_to_mint, len(token_names))))
-            raise Exception('Mint count mismatch {} != {}'.format(len(nfts_to_mint, len(token_names))))
-
-        token_index = 0
-        address_index = 1 # index 0 is the project wallet so skip it
-
-        for item in input_utxos:
-            count = item['count']
-            for i in range(0, count):
-                full_name = '{}.{}'.format(policy_id, token_names[token_index])
-                # add the nft being minted to the output
-                address_outputs[address_index]['assets'][full_name] = 1
-                token_index += 1
-            address_index += 1
-
-        for address in address_outputs:
+        for address in outputs:
             assets_string = ''
             for asset in address['assets']:
                 assets_string += '+{} {}'.format(address['assets'][asset], asset)
@@ -463,9 +446,9 @@ class Cardano:
         burn = ''
         for token_name in token_names:
             if len(burn) == 0:
-                burn += '{} {}.{}'.format(-1*nft_token_amount, policy_id, token_name)
+                burn += '{} {}.{}'.format(-1*nft_token_amount, policy_id, token_name.encode().hex())
             else:
-                burn += '+{} {}.{}'.format(-1*nft_token_amount, policy_id, token_name)
+                burn += '+{} {}.{}'.format(-1*nft_token_amount, policy_id, token_name.encode().hex())
             # remove the nft being burned from the output
             if token_name == '':
                 # special case for royalty tokens
@@ -492,7 +475,10 @@ class Cardano:
             assets_string = ''
             for asset in address['assets']:
                 if address['assets'][asset] != 0:
-                    assets_string += '+{} {}'.format(address['assets'][asset], asset)
+                    components = asset.split('.')
+                    policy_id = components[0]
+                    token_name = components[1].encode().hex()
+                    assets_string += '+{} {}.{}'.format(address['assets'][asset], policy_id, token_name)
 
             # Note that if the amount is zero (or just too small) but there is a
             # valid asset in the output then this transaction will fail when

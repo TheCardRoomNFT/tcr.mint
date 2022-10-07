@@ -1,0 +1,63 @@
+{
+    "name": "Layer 4",
+    "width": 400,
+    "height": 400,
+    "images": [
+        {
+            "properties": {
+                "diagonal-lines": "one"
+            },
+            "weight": 10,
+            "image": "art/dlines1.png"
+        },
+        {
+            "properties": {
+                "diagonal-lines": "two"
+            },
+            "weight": 15,
+            "image": "art/dlines2.png"
+        },
+        {
+            "properties": {
+                "diagonal-lines": "three"
+            },
+            "weight": 10,
+            "image": "art/dlines3.png"
+        },
+        {
+            "properties": {
+                "diagonal-lines": "four"
+            },
+            "weight": 10,
+            "image": "art/dlines4.png"
+        },
+        {
+            "properties": {
+                "diagonal-lines": "five"
+            },
+            "weight": 10,
+            "image": "art/dlines5.png"
+        },
+        {
+            "properties": {
+                "diagonal-lines": "six"
+            },
+            "weight": 15,
+            "image": "art/dlines6.png"
+        },
+        {
+            "properties": {
+                "diagonal-lines": "seven"
+            },
+            "weight": 10,
+            "image": "art/dlines7.png"
+        },
+        {
+            "properties": {
+                "diagonal-lines": "eight"
+            },
+            "weight": 20,
+            "image": "art/dlines8.png"
+        }
+    ]
+}
