@@ -30,11 +30,11 @@ Windows 10 WSL2
   - cd ~
   - mkdir cardano-bin
   - cd cardano-bin
-  - curl https://hydra.iohk.io/build/12975675/download/1/cardano-node-1.33.0-linux.tar.gz --output cardano-node-1.33.0-linux.tar.gz
-  - curl https://hydra.iohk.io/build/20024126/download/1/cardano-db-sync-13.0.0-linux.tar.gz --output cardano-db-sync-13.0.0-linux.tar.gz
+  - curl https://hydra.iohk.io/build/17428084/download/1/cardano-node-1.35.3-linux.tar.gz --output cardano-node-1.35.3-linux.tar.gz
+  - curl https://hydra.iohk.io/build/19105782/download/1/cardano-db-sync-13.0.5-linux.tar.gz --output cardano-db-sync-13.0.5-linux.tar.gz
   - curl https://github.com/input-output-hk/cardano-addresses/releases/download/3.12.0/cardano-addresses-3.12.0-linux64.tar.gz --output cardano-addresses-3.12.0-linux64.tar.gz
-  - tar --ungzip -xvf cardano-node-1.33.0-linux.tar.gz
-  - tar --ungzip -xvf cardano-db-sync-13.0.0-linux.tar.gz
+  - tar --ungzip -xvf cardano-node-1.35.3-linux.tar.gz
+  - tar --ungzip -xvf cardano-db-sync-13.0.5-linux.tar.gz
   - tar --ungzip -xvf cardano-addresses-3.12.0-linux64.tar.gz
   - Edit ~/.profile and add:
     * PATH=$PATH:/home/ubuntu/cardano-bin
