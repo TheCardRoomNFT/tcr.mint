@@ -210,7 +210,8 @@ def process_requests(network: str, wallet_name: str) -> None:
             inputs = database.query_utxo_inputs(utxo['tx-hash'])
             utxo['from'] = inputs[0]['address']
             utxo['from_stake'] = database.query_stake_address(utxo['from'])
-            logger.info('UTXO: from stake= {}'.format(utxo['from_stake']))
+            logger.info('UTXO: from address: {}'.format(utxo['from']))
+            logger.info('UTXO: from  stake: {}'.format(utxo['from_stake']))
         else:
             utxo['from'] = None
             utxo['from_stake'] = None
@@ -223,10 +224,8 @@ def process_requests(network: str, wallet_name: str) -> None:
     if not os.path.exists(subdir):
         os.mkdir(subdir)
 
-    normies_pkg = []
     # Process the request and build the mutation package
-    logger.info('Mutation Address: {}'.format(wallet.get_payment_address(addr_index)))
-
+    normies_pkg = []
     mutate_requests_collection = get_mutate_requests_collection()
     requests = mutate_requests_collection.find({'processed': False})
     processed_ids = []
@@ -504,10 +503,10 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
         with open(metadata_file, 'w') as file:
             file.write(json.dumps(mutant_metadata, indent=4))
 
-        # find the utxo to use
+        # Search for the utxo found / specified in the normies file
         input_utxo = None
         for utxo in utxos:
-            if utxo['amount'] == MINT_PAYMENT and utxo['from'] == mutant['from']:
+            if utxo['amount'] == MINT_PAYMENT and '{}:{}'.format(utxo['tx-hash'], utxo['tx-ix']) == mutant['tx']:
                 input_utxo = {'utxo': utxo, 'count': 1, 'refund': 0}
                 utxos.remove(utxo)
                 logger.info('Input UTXO: {}#{}'.format(utxo['tx-hash'], utxo['tx-ix']))
@@ -518,9 +517,14 @@ def mint_mutants(network: str, policy_name: str, mutants_file: str) -> None:
             continue
 
         # mint
-        txid = tcr.tcr.mint_nft_external(cardano, database,
-                                         minting_wallet, Wallet.ADDRESS_INDEX_MUTATE_REQUEST,
-                                         policy_name, input_utxo, metadata_file, sales)
+        dst = None
+        if 'destination' in mutant and mutant['destination'] != None:
+            dst = mutant['destination']
+
+        txid = tcr.tcr.mint_nft(cardano, database, minting_wallet,
+                                Wallet.ADDRESS_INDEX_MUTATE_REQUEST,
+                                policy_name, input_utxo, metadata_file, sales,
+                                destination=dst)
         logger.info('NFT Minted, TXID: {}'.format(txid))
         if txid == None:
             logger.error('txid == None')
