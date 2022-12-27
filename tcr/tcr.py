@@ -482,20 +482,23 @@ def get_tokens_from_metadata(nft_metadata_file: str):
     token_names = nft_metadata['token-names']
     return token_names
 
-def mint_nft_external(cardano: Cardano,
-                      database: Database,
-                      minting_wallet: Wallet,
-                      signing_index: int,
-                      policy_name: str,
-                      input: Dict,
-                      nft_metadata_file: str,
-                      sales: Sales) -> bool:
+def mint_nft(cardano: Cardano,
+             database: Database,
+             minting_wallet: Wallet,
+             signing_index: int,
+             policy_name: str,
+             input: Dict,
+             nft_metadata_file: str,
+             sales: Sales,
+             destination: str = None) -> bool:
     """
-    Mint an NFT to a different wallet.
+    Mint an NFT.  By default (destination=None) the NFT will be sent to the
+    source of the input UTXO.  Specify a different address (as a string) to
+    deliver it to a different wallet
 
     input is a dictionary. {"utxo": Dict, "count": N, "refund": lovelace}
-    "utxo" is minting "N" NFTs.  The sum must add up to the number in nft_metadata_file
-    Each utxo is assumed to contain 0 other assets.
+    "utxo" is minting "N" NFTs.  The sum must add up to the number in
+    nft_metadata_file Each utxo is assumed to contain 0 other assets.
     The destination address will be queried for each input utxo
     """
 
@@ -508,6 +511,11 @@ def mint_nft_external(cardano: Cardano,
         logger.error("NFT Uniqueness Violation found.")
         raise Exception('NFT Uniqueness Violation')
 
+    if destination == None:
+        # There can be different addresses in the inputs.  Arbitrarily pick the
+        # first one.  These should all map to the same stake address
+        destination = inputs[0]['address']
+
     # The NFT minted will be added to the output when the transaction is created
     outputs = [{
                     # project address
@@ -516,9 +524,7 @@ def mint_nft_external(cardano: Cardano,
                     'assets': {}
                 },
                 {
-                    # There can be different addresses in the inputs.  Arbitrarily pick the
-                    # first one.  These should all map to the same stake address
-                    'address': inputs[0]['address'],
+                    'address': destination,
                     'amount': 1,
                     'assets': cardano.create_output_assets(input, nft_metadata_file)
                 }]
@@ -539,7 +545,7 @@ def mint_nft_external(cardano: Cardano,
                                              fee,
                                              policy_name,
                                              nft_metadata_file,
-                                             'transaction/mint_nft_external_draft_tx_{}'.format(os.getpid()))
+                                             'transaction/mint_nft_draft_tx_{}'.format(os.getpid()))
 
     # https://github.com/input-output-hk/cardano-ledger-specs/blob/master/doc/explanations/min-utxo.rst
     cardano.calculate_min_required_utxo_mint(outputs)
@@ -547,7 +553,7 @@ def mint_nft_external(cardano: Cardano,
     logger.debug("Mint NFT External, total payment received: {} ADA".format(total_input_lovelace / 1000000))
 
     #fee
-    fee = cardano.calculate_min_fee('transaction/mint_nft_external_draft_tx_{}'.format(os.getpid()),
+    fee = cardano.calculate_min_fee('transaction/mint_nft_draft_tx_{}'.format(os.getpid()),
                                     1, len(outputs), 2)
 
     # update output amounts
@@ -587,19 +593,19 @@ def mint_nft_external(cardano: Cardano,
                                                       fee,
                                                       policy_name,
                                                       nft_metadata_file,
-                                                      'transaction/mint_nft_external_unsigned_tx_{}'.format(os.getpid()))
+                                                      'transaction/mint_nft_unsigned_tx_{}'.format(os.getpid()))
     sales.set_tokens_minted(input['utxo']['tx-hash'],
                             input['utxo']['tx-ix'],
                             get_tokens_from_metadata(nft_metadata_file))
 
     #sign
-    cardano.sign_transaction('transaction/mint_nft_external_unsigned_tx_{}'.format(os.getpid()),
+    cardano.sign_transaction('transaction/mint_nft_unsigned_tx_{}'.format(os.getpid()),
                              [cardano.get_policy_signing_key_file(policy_name),
                               minting_wallet.get_signing_key_file(signing_index)],
-                             'transaction/mint_nft_external_signed_tx_{}'.format(os.getpid()))
+                             'transaction/mint_nft_signed_tx_{}'.format(os.getpid()))
 
     #submit
-    tx_id = cardano.submit_transaction('transaction/mint_nft_external_signed_tx_{}'.format(os.getpid()))
+    tx_id = cardano.submit_transaction('transaction/mint_nft_signed_tx_{}'.format(os.getpid()))
     return tx_id
 
 def batch_mint_next_nft_in_series(cardano: Cardano,
@@ -622,14 +628,12 @@ def batch_mint_next_nft_in_series(cardano: Cardano,
     nft_metadata = Nft.parse_metadata_file(nft_metadata_file)
 
     logger.info('Mint Next Series NFT, Mint NFTs: {}'.format(nft_metadata['token-names']))
-    tx_id = mint_nft_external(cardano,
-                              database,
-                              minting_wallet,
-                              Wallet.ADDRESS_INDEX_MINT,
-                              policy_name,
-                              input,
-                              nft_metadata_file,
-                              sales)
+    tx_id = mint_nft(cardano, database, minting_wallet,
+                     Wallet.ADDRESS_INDEX_MINT,
+                     policy_name,
+                     input,
+                     nft_metadata_file,
+                     sales)
 
     if tx_id == None:
         # delete the utxo so the main payment processor will try again

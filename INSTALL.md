@@ -23,17 +23,17 @@ Windows 10 WSL2
 
 ## 2.  Install Cardano Binaries
 
-  - https://hydra.iohk.io/job/Cardano/cardano-node/cardano-node-linux/latest-finished
-  - https://hydra.iohk.io/job/Cardano/cardano-db-sync/cardano-db-sync-linux/latest-finished
+  - https://github.com/input-output-hk/cardano-node/releases
+  - https://github.com/input-output-hk/cardano-db-sync/releases
 
 
   - cd ~
   - mkdir cardano-bin
   - cd cardano-bin
-  - curl https://hydra.iohk.io/build/17428084/download/1/cardano-node-1.35.3-linux.tar.gz --output cardano-node-1.35.3-linux.tar.gz
+  - curl  curl https://update-cardano-mainnet.iohk.io/cardano-node-releases/cardano-node-1.35.4-linux.tar.gz --output cardano-node-1.35.4-linux.tar.gz
   - curl https://hydra.iohk.io/build/19105782/download/1/cardano-db-sync-13.0.5-linux.tar.gz --output cardano-db-sync-13.0.5-linux.tar.gz
   - curl https://github.com/input-output-hk/cardano-addresses/releases/download/3.12.0/cardano-addresses-3.12.0-linux64.tar.gz --output cardano-addresses-3.12.0-linux64.tar.gz
-  - tar --ungzip -xvf cardano-node-1.35.3-linux.tar.gz
+  - tar --ungzip -xvf cardano-node-1.35.4-linux.tar.gz
   - tar --ungzip -xvf cardano-db-sync-13.0.5-linux.tar.gz
   - tar --ungzip -xvf cardano-addresses-3.12.0-linux64.tar.gz
   - Edit ~/.profile and add:
@@ -63,6 +63,8 @@ Windows 10 WSL2
   - git clone https://github.com/input-output-hk/cardano-db-sync.git
 
 ## 5.  Copy Configuration & Scripts
+
+https://book.world.dev.cardano.org/environments.html
 
 Note that configuration files for mainnet and testnet are included in
 ~/workspace/tcr.mint/scripts/mainnet and ~/workspace/tcr.mint/scripts/testnet
@@ -123,8 +125,8 @@ Make sure the files are executable
 Make sure you have the same version of db-sync source as version of the binary
 file that was installed:
   - cardano-db-sync --version
-    > cardano-db-sync 11.0.0 - linux-x86_64 - ghc-8.10<br>
-    > git revision e2d5cf8068c030ed3c8006ce008b4100fbaad581<br>
+    > cardano-db-sync 13.0.5 - linux-x86_64 - ghc-8.10
+    > git revision 8ad98d48e0068f3768d48e18fdcbe254037cba3b
   - cd ~/cardano-src/cardano-db-sync
   - git checkout e2d5cf8068c030ed3c8006ce008b4100fbaad581
 
@@ -132,6 +134,10 @@ Run and Configure the database to run on startup
   - sudo systemctl enable postgresql
   - sudo service postgresql start
 
+Other commands
+  - Run PostgreSQL: psql
+  - List databases: \l
+  - Drop database: DROP DATABASE cexplorer;
 
 ## 7.  Setup cardano node and dbsync to run on startup
   - sudo cp ~/workspace/tcr.mint/scripts/init.d/cardano-* /etc/init.d
